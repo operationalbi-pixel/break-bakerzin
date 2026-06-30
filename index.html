@@ -125,10 +125,6 @@
                  background: linear-gradient(transparent, rgba(0,0,0,0.65)); display: flex; flex-direction: column; gap: 10px; align-items: center; }
   #scan-msg { color: #fff; font-size: 13px; min-height: 18px; font-weight: 700; }
   #scan-flash { position: absolute; inset: 0; background: #fff; opacity: 0; z-index: 3; pointer-events: none; transition: opacity 0.3s; }
-  .scan-permission { position: absolute; inset: 0; z-index: 5; display: flex; align-items: center; justify-content: center; padding: 22px; background: rgba(0,0,0,0.82); color: #fff; text-align: center; }
-  .scan-permission .perm-card { width: 100%; max-width: 340px; border: 1px solid rgba(255,255,255,0.18); border-radius: 18px; padding: 22px; background: rgba(255,255,255,0.08); backdrop-filter: blur(10px); }
-  .scan-permission .perm-title { font-family: var(--serif); font-weight: 700; font-size: 23px; margin-bottom: 8px; }
-  .scan-permission .perm-text { font-size: 13px; line-height: 1.55; opacity: 0.88; margin-bottom: 16px; }
 
   /* modal riwayat staff */
   #modal { position: fixed; inset: 0; background: rgba(28,25,22,0.5); z-index: 70;
@@ -273,13 +269,6 @@
     <div class="s">Arahkan ke sticker — terbaca otomatis</div>
   </div>
   <div id="reader"></div>
-  <div id="scan-permission" class="scan-permission hidden">
-    <div class="perm-card">
-      <div class="perm-title">Izin Kamera</div>
-      <div class="perm-text" id="camera-permission-text">Aplikasi membutuhkan akses kamera untuk scan QR. Saat pop-up browser muncul, pilih <b>Allow / Izinkan</b>.</div>
-      <button class="btn accent" id="btn-camera-permission">Izinkan Kamera</button>
-    </div>
-  </div>
   <div id="scan-frame"><div class="c"></div></div>
   <div id="scan-flash"></div>
   <div id="scan-bottom">
@@ -432,109 +421,50 @@
   // ── SCANNER ───────────────────────────────────────────
   var scanner = null, scanBusy = false, scannerStarting = false;
 
-  function setPermissionPanel(showPanel, text, buttonText) {
-    show('scan-permission', !!showPanel);
-    if ($('camera-permission-text') && text) $('camera-permission-text').innerHTML = text;
-    if ($('btn-camera-permission') && buttonText) $('btn-camera-permission').textContent = buttonText;
-  }
-
-  function cameraErrorMessage(err) {
-    var name = err && err.name ? err.name : '';
-    if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
-      return 'Izin kamera ditolak / terblokir. Klik ikon gembok di browser → Camera → Allow, lalu refresh halaman.';
-    }
-    if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
-      return 'Kamera tidak ditemukan di perangkat ini.';
-    }
-    if (name === 'NotReadableError' || name === 'TrackStartError') {
-      return 'Kamera sedang dipakai aplikasi lain. Tutup kamera/WhatsApp/Instagram, lalu coba lagi.';
-    }
-    if (name === 'OverconstrainedError') {
-      return 'Kamera belakang tidak tersedia. Aplikasi akan mencoba kamera utama.';
-    }
-    return 'Kamera belum bisa dibuka. Pastikan browser memberi izin kamera untuk situs ini.';
-  }
-
-  function requestCameraPermission() {
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      return Promise.reject(new Error('Browser tidak mendukung akses kamera.'));
-    }
-
-    // Request langsung dari klik tombol Scan agar pop-up izin kamera browser muncul lebih cepat.
-    return navigator.mediaDevices.getUserMedia({
-      audio: false,
-      video: { facingMode: { ideal: 'environment' } }
-    }).then(function (stream) {
-      stream.getTracks().forEach(function (track) { track.stop(); });
-      return true;
-    }).catch(function (err) {
-      // Fallback untuk perangkat yang tidak mengenali constraint kamera belakang.
-      if (err && err.name === 'OverconstrainedError') {
-        return navigator.mediaDevices.getUserMedia({ audio: false, video: true }).then(function (stream) {
-          stream.getTracks().forEach(function (track) { track.stop(); });
-          return true;
-        });
-      }
-      throw err;
-    });
-  }
-
-  function startHtml5Scanner() {
-    $('reader').innerHTML = '';
-    scanBusy = false;
-
-    scanner = new Html5Qrcode('reader', {
-      formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
-      experimentalFeatures: { useBarCodeDetectorIfSupported: true },
-      rememberLastUsedCamera: true
-    });
-
-    return scanner.start(
-      { facingMode: { ideal: 'environment' } },
-      {
-        fps: 15,
-        disableFlip: true,
-        aspectRatio: 1.333334,
-        qrbox: function (w, h) {
-          var m = Math.min(w, h);
-          var box = Math.min(300, Math.floor(m * 0.72));
-          return { width: box, height: box };
-        }
-      },
-      onScanSuccess,
-      function () {}
-    );
-  }
-
   function openScanner() {
     // cegah double tap membuat kamera start dua kali
     if (scannerStarting || scanner) return;
 
     show('scan-overlay', true);
-    $('scan-msg').textContent = 'Meminta izin kamera…';
-    setPermissionPanel(true, 'Aplikasi membutuhkan akses kamera untuk scan QR. Saat pop-up browser muncul, pilih <b>Allow / Izinkan</b>.', 'Izinkan Kamera');
+    $('scan-msg').textContent = 'Membuka kamera…';
     $('reader').innerHTML = '';
     scanBusy = false;
     scannerStarting = true;
 
-    requestCameraPermission()
-      .then(function () {
-        $('scan-msg').textContent = 'Membuka kamera…';
-        setPermissionPanel(false);
-        return startHtml5Scanner();
-      })
-      .then(function () {
+    try {
+      scanner = new Html5Qrcode('reader', {
+        formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
+        experimentalFeatures: { useBarCodeDetectorIfSupported: true }
+      });
+
+      scanner.start(
+        { facingMode: { ideal: 'environment' } },
+        {
+          fps: 12,
+          disableFlip: true,
+          aspectRatio: 1.333334,
+          qrbox: function (w, h) {
+            var m = Math.min(w, h);
+            var box = Math.min(300, Math.floor(m * 0.72));
+            return { width: box, height: box };
+          }
+        },
+        onScanSuccess,
+        function () {}
+      ).then(function () {
         scannerStarting = false;
         $('scan-msg').textContent = 'Arahkan kamera ke QR';
-      })
-      .catch(function (err) {
+      }).catch(function () {
         scannerStarting = false;
         scanner = null;
         $('reader').innerHTML = '';
-        var msg = cameraErrorMessage(err);
-        $('scan-msg').textContent = msg;
-        setPermissionPanel(true, msg, 'Coba Izinkan Lagi');
+        $('scan-msg').textContent = 'Kamera tidak bisa diakses — izinkan kamera untuk situs ini, lalu coba lagi.';
       });
+    } catch (e) {
+      scannerStarting = false;
+      scanner = null;
+      $('scan-msg').textContent = 'Scanner gagal dibuka — refresh halaman lalu coba lagi.';
+    }
   }
 
   function closeScanner() {
@@ -795,9 +725,6 @@
   $('btn-scan-out').addEventListener('click', openScanner);
   $('btn-scan-in').addEventListener('click', openScanner);
   $('btn-scan-cancel').addEventListener('click', closeScanner);
-  $('btn-camera-permission').addEventListener('click', function () {
-    if (!scannerStarting && !scanner) openScanner();
-  });
   $('btn-result-ok').addEventListener('click', renderHome);
   $('btn-mon-refresh').addEventListener('click', loadMonitor);
 
