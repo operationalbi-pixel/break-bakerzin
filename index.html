@@ -125,6 +125,10 @@
                  background: linear-gradient(transparent, rgba(0,0,0,0.65)); display: flex; flex-direction: column; gap: 10px; align-items: center; }
   #scan-msg { color: #fff; font-size: 13px; min-height: 18px; font-weight: 700; }
   #scan-flash { position: absolute; inset: 0; background: #fff; opacity: 0; z-index: 3; pointer-events: none; transition: opacity 0.3s; }
+  .scan-permission { position: absolute; inset: 0; z-index: 5; display: flex; align-items: center; justify-content: center; padding: 22px; background: rgba(0,0,0,0.82); color: #fff; text-align: center; }
+  .scan-permission .perm-card { width: 100%; max-width: 340px; border: 1px solid rgba(255,255,255,0.18); border-radius: 18px; padding: 22px; background: rgba(255,255,255,0.08); backdrop-filter: blur(10px); }
+  .scan-permission .perm-title { font-family: var(--serif); font-weight: 700; font-size: 23px; margin-bottom: 8px; }
+  .scan-permission .perm-text { font-size: 13px; line-height: 1.55; opacity: 0.88; margin-bottom: 16px; }
 
   /* modal riwayat staff */
   #modal { position: fixed; inset: 0; background: rgba(28,25,22,0.5); z-index: 70;
@@ -269,6 +273,13 @@
     <div class="s">Arahkan ke sticker — terbaca otomatis</div>
   </div>
   <div id="reader"></div>
+  <div id="scan-permission" class="scan-permission hidden">
+    <div class="perm-card">
+      <div class="perm-title">Izin Kamera</div>
+      <div class="perm-text" id="camera-permission-text">Aplikasi membutuhkan akses kamera untuk scan QR. Saat pop-up browser muncul, pilih <b>Allow / Izinkan</b>.</div>
+      <button class="btn accent" id="btn-camera-permission">Izinkan Kamera</button>
+    </div>
+  </div>
   <div id="scan-frame"><div class="c"></div></div>
   <div id="scan-flash"></div>
   <div id="scan-bottom">
@@ -421,56 +432,118 @@
   // ── SCANNER ───────────────────────────────────────────
   var scanner = null, scanBusy = false, scannerStarting = false;
 
+  function setPermissionPanel(showPanel, text, buttonText) {
+    show('scan-permission', !!showPanel);
+    if ($('camera-permission-text') && text) $('camera-permission-text').innerHTML = text;
+    if ($('btn-camera-permission') && buttonText) $('btn-camera-permission').textContent = buttonText;
+  }
+
+  function cameraErrorMessage(err) {
+    var name = err && err.name ? err.name : '';
+    if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+      return 'Akses kamera belum aktif. Buka izin situs dari ikon gembok di browser, pilih Camera/Kamera → Allow/Izinkan, lalu tekan Coba Lagi.';
+    }
+    if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+      return 'Kamera tidak ditemukan di perangkat ini.';
+    }
+    if (name === 'NotReadableError' || name === 'TrackStartError') {
+      return 'Kamera sedang dipakai aplikasi lain. Tutup kamera/WhatsApp/Instagram, lalu coba lagi.';
+    }
+    if (name === 'OverconstrainedError') {
+      return 'Kamera belakang tidak tersedia. Aplikasi akan mencoba kamera utama.';
+    }
+    return 'Kamera belum bisa dibuka. Pastikan izin kamera untuk situs ini sudah Allow/Izinkan.';
+  }
+
+  function getCameraPermissionState() {
+    if (!navigator.permissions || !navigator.permissions.query) return Promise.resolve('unknown');
+    try {
+      return navigator.permissions.query({ name: 'camera' }).then(function (status) {
+        return status && status.state ? status.state : 'unknown';
+      }).catch(function () { return 'unknown'; });
+    } catch (e) {
+      return Promise.resolve('unknown');
+    }
+  }
+
+  function startHtml5Scanner(useFallbackCamera) {
+    $('reader').innerHTML = '';
+    scanBusy = false;
+
+    scanner = new Html5Qrcode('reader', {
+      formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
+      experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+      rememberLastUsedCamera: true
+    });
+
+    var cameraConfig = useFallbackCamera ? true : { facingMode: { ideal: 'environment' } };
+
+    // Penting: hanya panggil scanner.start() satu kali.
+    // Jangan pre-request getUserMedia, karena itu membuat prompt izin kamera muncul berkali-kali.
+    return scanner.start(
+      cameraConfig,
+      {
+        fps: 12,
+        disableFlip: true,
+        aspectRatio: 1.333334,
+        qrbox: function (w, h) {
+          var m = Math.min(w, h);
+          var box = Math.min(300, Math.floor(m * 0.72));
+          return { width: box, height: box };
+        }
+      },
+      onScanSuccess,
+      function () {}
+    ).catch(function (err) {
+      if (!useFallbackCamera && err && err.name === 'OverconstrainedError') {
+        try { scanner.clear(); } catch (e) {}
+        scanner = null;
+        return startHtml5Scanner(true);
+      }
+      throw err;
+    });
+  }
+
   function openScanner() {
     // cegah double tap membuat kamera start dua kali
     if (scannerStarting || scanner) return;
 
     show('scan-overlay', true);
-    $('scan-msg').textContent = 'Membuka kamera…';
+    setPermissionPanel(false);
+    $('scan-msg').textContent = 'Membuka kamera… pilih Izinkan jika muncul pop-up browser.';
     $('reader').innerHTML = '';
     scanBusy = false;
     scannerStarting = true;
 
-    try {
-      scanner = new Html5Qrcode('reader', {
-        formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
-        experimentalFeatures: { useBarCodeDetectorIfSupported: true }
-      });
-
-      scanner.start(
-        { facingMode: { ideal: 'environment' } },
-        {
-          fps: 12,
-          disableFlip: true,
-          aspectRatio: 1.333334,
-          qrbox: function (w, h) {
-            var m = Math.min(w, h);
-            var box = Math.min(300, Math.floor(m * 0.72));
-            return { width: box, height: box };
-          }
-        },
-        onScanSuccess,
-        function () {}
-      ).then(function () {
+    getCameraPermissionState()
+      .then(function (state) {
+        if (state === 'denied') {
+          throw { name: 'NotAllowedError' };
+        }
+        return startHtml5Scanner(false);
+      })
+      .then(function () {
         scannerStarting = false;
         $('scan-msg').textContent = 'Arahkan kamera ke QR';
-      }).catch(function () {
+      })
+      .catch(function (err) {
         scannerStarting = false;
-        scanner = null;
+        if (scanner) {
+          try { scanner.clear(); } catch (e) {}
+          scanner = null;
+        }
         $('reader').innerHTML = '';
-        $('scan-msg').textContent = 'Kamera tidak bisa diakses — izinkan kamera untuk situs ini, lalu coba lagi.';
+        var msg = cameraErrorMessage(err);
+        $('scan-msg').textContent = msg;
+        setPermissionPanel(true, msg + '<br><br><b>Catatan:</b> browser tidak mengizinkan website membuka halaman setting permission secara otomatis. Gunakan ikon gembok di address bar untuk mengubah izin kamera.', 'Coba Lagi');
       });
-    } catch (e) {
-      scannerStarting = false;
-      scanner = null;
-      $('scan-msg').textContent = 'Scanner gagal dibuka — refresh halaman lalu coba lagi.';
-    }
   }
 
   function closeScanner() {
     show('scan-overlay', false);
     scannerStarting = false;
     scanBusy = false;
+    setPermissionPanel(false);
     if (scanner) {
       var s = scanner;
       scanner = null;
@@ -482,26 +555,26 @@
       $('reader').innerHTML = '';
     }
   }
+
   function onScanSuccess(text) {
     if (scanBusy) return;
-    var token = (APP.state && APP.state.qrToken) || 'BAKERZIN-BREAK';
-    text = String(text).trim();
+    var token = 'BKRZ-BREAK-QR|';
+    if (!text || typeof text !== 'string') return;
     if (text.indexOf(token) !== 0) { $('scan-msg').textContent = 'QR tidak dikenal — arahkan ke sticker QR Absensi Break.'; return; }
     scanBusy = true;
-    if (navigator.vibrate) navigator.vibrate(80);
+    if (navigator.vibrate) navigator.vibrate(90);
     $('scan-flash').style.opacity = '0.7';
     setTimeout(function () { $('scan-flash').style.opacity = '0'; }, 120);
     $('scan-msg').textContent = 'QR terbaca — mencatat…';
     api({ fn: 'scan', nik: APP.emp.nik, qr: text }).then(function (res) {
       closeScanner();
-      applyState(res);
-      if (!res.ok) { alert(res.error); renderHome(); return; }
-      if (res.action === 'IN') showResult(res.result); else renderHome();
+      showResult(res);
     }).catch(function (e) {
       scanBusy = false;
       $('scan-msg').textContent = 'Gagal mencatat: ' + e.message + ' — coba lagi.';
     });
   }
+
   function showResult(r) {
     stopCountdown();
     show('box-active', false); show('box-start', false); show('box-blocked', false);
@@ -725,6 +798,9 @@
   $('btn-scan-out').addEventListener('click', openScanner);
   $('btn-scan-in').addEventListener('click', openScanner);
   $('btn-scan-cancel').addEventListener('click', closeScanner);
+  $('btn-camera-permission').addEventListener('click', function () {
+    if (!scannerStarting && !scanner) openScanner();
+  });
   $('btn-result-ok').addEventListener('click', renderHome);
   $('btn-mon-refresh').addEventListener('click', loadMonitor);
 
