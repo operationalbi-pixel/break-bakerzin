@@ -104,7 +104,13 @@
   /* scanner */
   #scan-overlay { position: fixed; inset: 0; background: #000; z-index: 60; display: flex; flex-direction: column; }
   #reader { flex: 1; overflow: hidden; border: none !important; }
-  #reader video { width: 100% !important; height: 100% !important; object-fit: cover; }
+  #reader video { width: 100% !important; height: 100% !important; object-fit: cover; display: block !important; }
+
+  /* GitHub Pages camera stability: force html5-qrcode video layer to fill the overlay */
+  #reader, #reader > div, #reader__scan_region { width: 100% !important; height: 100% !important; border: 0 !important; }
+  #reader__scan_region { display: flex !important; align-items: center !important; justify-content: center !important; }
+  #reader__dashboard, #reader__status_span, #reader__header_message { display: none !important; }
+  #reader canvas { display: none !important; }
   /* GitHub Pages friendly: sembunyikan UI/frame bawaan html5-qrcode agar hanya custom frame yang tampil */
   #reader__dashboard,
   #reader__dashboard_section,
@@ -427,15 +433,92 @@
   function stopCountdown() { if (APP.timer) { clearInterval(APP.timer); APP.timer = null; } }
 
   // ── SCANNER ───────────────────────────────────────────
-  // Disesuaikan untuk GitHub Pages: cukup upload sebagai file static.
+  // Disesuaikan untuk GitHub Pages: file static + pemilihan kamera lebih stabil di Android Chrome.
   // Kamera tetap wajib HTTPS + izin browser 1x per domain github.io.
   var scanner = null, scanBusy = false, scanStarting = false;
+
+  function scanConfig() {
+    return {
+      fps: 10,
+      disableFlip: true,
+      experimentalFeatures: { useBarCodeDetectorIfSupported: true }
+      // qrbox tidak dipakai agar frame bawaan tidak muncul dobel. Frame custom tetap satu.
+    };
+  }
+
+  function setScanMessage(msg) {
+    $('scan-msg').textContent = msg || '';
+  }
+
+  function normalizeCamLabel(label) {
+    return String(label || '').toLowerCase();
+  }
+
+  function pickBackCamera(cameras) {
+    cameras = cameras || [];
+    if (!cameras.length) return null;
+    var back = cameras.filter(function (c) {
+      var l = normalizeCamLabel(c.label);
+      return l.indexOf('back') >= 0 || l.indexOf('rear') >= 0 || l.indexOf('environment') >= 0 || l.indexOf('belakang') >= 0 || l.indexOf('kamera 0') >= 0;
+    });
+    // Di banyak HP Android, kamera belakang sering muncul sebagai device terakhir jika label kosong/tidak jelas.
+    return (back[0] || cameras[cameras.length - 1] || cameras[0]);
+  }
+
+  function markVideoReady() {
+    setTimeout(function () {
+      var v = $('reader').querySelector('video');
+      if (v) {
+        v.setAttribute('playsinline', 'true');
+        v.setAttribute('muted', 'true');
+        try { v.play && v.play(); } catch (e) {}
+      }
+    }, 250);
+  }
+
+  function clearScannerOnly() {
+    if (scanner) {
+      try { scanner.clear(); } catch (e) {}
+    }
+    scanner = null;
+  }
+
+  function startWithFallback() {
+    var cfg = scanConfig();
+
+    function startByCameraId() {
+      return Html5Qrcode.getCameras().then(function (cameras) {
+        var cam = pickBackCamera(cameras);
+        if (!cam || !cam.id) throw new Error('NO_CAMERA_ID');
+        setScanMessage('Membuka kamera belakang…');
+        return scanner.start(String(cam.id), cfg, onScanSuccess, function () {});
+      });
+    }
+
+    function startByEnvironment() {
+      setScanMessage('Membuka kamera…');
+      return scanner.start({ facingMode: 'environment' }, cfg, onScanSuccess, function () {});
+    }
+
+    function startByAnyCamera() {
+      setScanMessage('Mencoba kamera yang tersedia…');
+      return scanner.start({ facingMode: { ideal: 'environment' } }, cfg, onScanSuccess, function () {});
+    }
+
+    // Urutan dibuat khusus untuk Android Chrome/GitHub Pages:
+    // 1) pakai cameraId dari daftar device, 2) fallback environment, 3) fallback ideal.
+    return startByCameraId().catch(function () {
+      return startByEnvironment();
+    }).catch(function () {
+      return startByAnyCamera();
+    });
+  }
 
   function openScanner() {
     if (scanStarting || scanner) return; // cegah double tap membuka kamera berkali-kali
 
     show('scan-overlay', true);
-    $('scan-msg').textContent = 'Membuka kamera… Jika muncul izin, pilih Allow / Izinkan.';
+    setScanMessage('Membuka kamera…');
     scanBusy = false;
     scanStarting = true;
 
@@ -447,24 +530,23 @@
       formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE]
     });
 
-    scanner.start(
-      { facingMode: { ideal: 'environment' } },
-      {
-        fps: 12,
-        aspectRatio: 1.7777778,
-        disableFlip: true
-        // Area scan dibuat full-camera, supaya frame bawaan tidak muncul dobel.
-      },
-      onScanSuccess,
-      function () {}
-    ).then(function () {
+    startWithFallback().then(function () {
       scanStarting = false;
-      $('scan-msg').textContent = 'Arahkan QR ke dalam frame.';
-    }).catch(function () {
+      markVideoReady();
+      setScanMessage('Arahkan QR ke dalam frame.');
+    }).catch(function (err) {
       scanStarting = false;
-      try { if (scanner) scanner.clear(); } catch (e) {}
-      scanner = null;
-      $('scan-msg').textContent = 'Kamera belum bisa dibuka. Klik ikon gembok di browser → Site settings → Camera → Allow, lalu refresh.';
+      var code = (err && (err.name || err.message)) ? String(err.name || err.message) : '';
+      clearScannerOnly();
+      if (code.indexOf('NotReadable') >= 0 || code.indexOf('TrackStart') >= 0) {
+        setScanMessage('Kamera sudah diizinkan, tapi sedang dipakai/terkunci. Tutup aplikasi kamera/WhatsApp, lalu refresh dan coba lagi.');
+      } else if (code.indexOf('NotFound') >= 0 || code.indexOf('NO_CAMERA') >= 0) {
+        setScanMessage('Kamera tidak ditemukan oleh browser. Coba tutup tab lain, refresh, lalu scan lagi.');
+      } else if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+        setScanMessage('Kamera hanya bisa dibuka lewat HTTPS. Gunakan link github.io, bukan file lokal.');
+      } else {
+        setScanMessage('Kamera belum bisa dibuka. Pastikan Chrome Camera = Allow, tutup tab/aplikasi lain yang memakai kamera, lalu refresh.');
+      }
     });
   }
 
