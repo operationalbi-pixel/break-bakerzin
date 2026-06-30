@@ -105,6 +105,7 @@
   #scan-overlay { position: fixed; inset: 0; background: #000; z-index: 60; display: flex; flex-direction: column; }
   #reader { flex: 1; overflow: hidden; border: none !important; }
   #reader video { width: 100% !important; height: 100% !important; object-fit: cover; display: block !important; }
+  #native-video { width: 100% !important; height: 100% !important; object-fit: cover; background: #000; display: block !important; }
 
   /* GitHub Pages camera stability: force html5-qrcode video layer to fill the overlay */
   #reader, #reader > div, #reader__scan_region { width: 100% !important; height: 100% !important; border: 0 !important; }
@@ -307,13 +308,14 @@
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script>
   // ════════════════════════════════════════════════════════════
-  // GITHUB PAGES VERSION
+  // GITHUB PAGES FAST VERSION v7
   // Upload file ini sebagai index.html di root repository GitHub Pages.
   // Backend tetap Google Apps Script Web App URL (diakhiri /exec).
-  var API_URL = 'https://script.google.com/macros/s/AKfycbwEM1iu_Ywl60n2_wdml4kmGrmrsxbfvldV8dbycWDqf0fRzQ-COtze96fFfU3KJaNU9Q/exec';
+  // Session tahan 30 hari di browser + server, jadi tidak perlu login ulang setiap hari.
+  var API_URL = 'https://script.google.com/macros/s/AKfycbzLiN5eUEiTL0eQzjhuGe8g0aphmukrshQbpMxHq-06bdh9iUtGUdc60wExRm3pYxixjw/exec';
   // ════════════════════════════════════════════════════════════
 
-  var APP = { emp: null, state: null, offset: 0, timer: null, monTimer: null, monTick: null,
+  var APP = { emp: null, state: null, session: null, offset: 0, timer: null, monTimer: null, monTick: null,
               lastMon: null, hq: { outlet: 'ALL', days: 1, tab: 'live', data: null, timer: null, tick: null } };
 
   function $(id) { return document.getElementById(id); }
@@ -331,15 +333,66 @@
     return '<div class="ava" style="width: ' + size + 'px; height: ' + size + 'px; font-size: ' + Math.round(size * 0.3) + 'px;">' + inner + '</div>';
   }
 
-  function api(body) {
-    return fetch(API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify(body)
-    }).then(function (r) {
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      return r.json();
-    });
+  function parseJsonSafe(s, fb) {
+    try { return s ? JSON.parse(s) : fb; } catch (e) { return fb; }
+  }
+
+  function sleep(ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); }
+
+  function clearSavedSession() {
+    localStorage.removeItem('ab_nik');
+    localStorage.removeItem('ab_session');
+    localStorage.removeItem('ab_emp');
+    localStorage.removeItem('ab_state');
+    localStorage.removeItem('ab_login_at');
+  }
+
+  function handleSessionExpired() {
+    clearSavedSession();
+    APP.emp = null;
+    APP.state = null;
+    APP.session = null;
+    stopCountdown(); stopMonitorPoll(); stopHqPoll();
+    show('scr-home', false);
+    show('scr-login', true);
+    $('login-err').textContent = 'Sesi habis. Silakan login ulang.';
+  }
+
+  function api(body, opt) {
+    opt = opt || {};
+    body = Object.assign({}, body || {});
+    if (APP.session && !body.session) body.session = APP.session;
+    if (APP.emp && APP.emp.nik && !body.nik) body.nik = APP.emp.nik;
+
+    var retries = opt.retries == null ? 1 : Number(opt.retries);
+    var timeoutMs = opt.timeoutMs || 22000;
+
+    function attempt(n) {
+      var controller = window.AbortController ? new AbortController() : null;
+      var timer = controller ? setTimeout(function () { controller.abort(); }, timeoutMs) : null;
+      return fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(body),
+        signal: controller ? controller.signal : undefined
+      }).then(function (r) {
+        if (timer) clearTimeout(timer);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      }).then(function (res) {
+        if (res && res.code === 'SESSION_EXPIRED') {
+          handleSessionExpired();
+          throw new Error(res.error || 'Sesi habis.');
+        }
+        return res;
+      }).catch(function (err) {
+        if (timer) clearTimeout(timer);
+        if (n < retries) return sleep(450 + n * 700).then(function () { return attempt(n + 1); });
+        throw err;
+      });
+    }
+
+    return attempt(0);
   }
   function busy(btn, on, label) {
     btn.disabled = on;
@@ -347,20 +400,36 @@
     else if (btn.dataset.label) { btn.textContent = btn.dataset.label; }
   }
   function applyState(res) {
-    if (res.state) APP.state = res.state;
+    if (res.state) {
+      APP.state = res.state;
+      try { localStorage.setItem('ab_state', JSON.stringify(APP.state)); } catch (e) {}
+    }
+    if (res.emp) {
+      APP.emp = res.emp;
+      try { localStorage.setItem('ab_emp', JSON.stringify(APP.emp)); } catch (e) {}
+    }
+    if (res.session) {
+      APP.session = res.session;
+      localStorage.setItem('ab_session', res.session);
+      localStorage.setItem('ab_login_at', String(Date.now()));
+    }
     if (res.state && res.state.serverNow) APP.offset = res.state.serverNow - Date.now();
+    try { localStorage.setItem('ab_last_active', String(Date.now())); } catch (e) {}
   }
 
   // ── LOGIN ─────────────────────────────────────────────
   function doLogin(nik, silent) {
     var btn = $('btn-login');
     if (!silent) busy(btn, true, 'Mencari NIK…');
-    api({ fn: 'login', nik: nik }).then(function (res) {
+    api({ fn: 'login', nik: nik }, { retries: 2, timeoutMs: 30000 }).then(function (res) {
       busy(btn, false);
       if (!res.ok) { $('login-err').textContent = res.error; show('scr-login', true); return; }
       APP.emp = res.emp;
+      APP.session = res.session || null;
       applyState(res);
       localStorage.setItem('ab_nik', res.emp.nik);
+      try { localStorage.setItem('ab_emp', JSON.stringify(res.emp)); } catch (e) {}
+      $('login-err').textContent = '';
       renderHome();
     }).catch(function (e) {
       busy(btn, false);
@@ -368,6 +437,35 @@
       show('scr-login', true);
     });
   }
+
+  function restoreCachedSession() {
+    var savedSession = localStorage.getItem('ab_session');
+    var savedEmp = parseJsonSafe(localStorage.getItem('ab_emp'), null);
+    var savedState = parseJsonSafe(localStorage.getItem('ab_state'), null);
+    var loginAt = Number(localStorage.getItem('ab_login_at') || 0);
+    var maxAge = 30 * 24 * 60 * 60 * 1000; // session tahan 30 hari selama tidak logout / data browser tidak dihapus
+
+    if (!savedSession || !savedEmp || !savedState || !loginAt || Date.now() - loginAt > maxAge) return false;
+
+    APP.session = savedSession;
+    APP.emp = savedEmp;
+    APP.state = savedState;
+    if (APP.state.serverNow) APP.offset = APP.state.serverNow - Date.now();
+
+    renderHome();
+
+    // Refresh status dari BigQuery tanpa membaca Spreadsheet lagi.
+    api({ fn: 'state' }, { retries: 1, timeoutMs: 22000 }).then(function (res) {
+      if (!res.ok) return;
+      applyState(res);
+      renderHome();
+    }).catch(function () {
+      // Kalau koneksi sedang jelek, tetap tampilkan cache agar user tidak stuck di halaman login.
+    });
+
+    return true;
+  }
+
 
   // ── HOME ──────────────────────────────────────────────
   function renderHome() {
@@ -433,16 +531,19 @@
   function stopCountdown() { if (APP.timer) { clearInterval(APP.timer); APP.timer = null; } }
 
   // ── SCANNER ───────────────────────────────────────────
-  // Disesuaikan untuk GitHub Pages: file static + pemilihan kamera lebih stabil di Android Chrome.
-  // Kamera tetap wajib HTTPS + izin browser 1x per domain github.io.
+  // Mode cepat: pakai native BarcodeDetector di Android Chrome kalau tersedia.
+  // Fallback ke html5-qrcode jika browser tidak mendukung native detector.
   var scanner = null, scanBusy = false, scanStarting = false;
+  var nativeStream = null, nativeVideo = null, nativeDetector = null, nativeLoopTimer = null, nativeDetecting = false;
 
   function scanConfig() {
+    var box = Math.round(Math.min(window.innerWidth * 0.72, 330));
     return {
-      fps: 10,
+      fps: 18,
+      qrbox: { width: box, height: box },
+      aspectRatio: 1.7777778,
       disableFlip: true,
       experimentalFeatures: { useBarCodeDetectorIfSupported: true }
-      // qrbox tidak dipakai agar frame bawaan tidak muncul dobel. Frame custom tetap satu.
     };
   }
 
@@ -461,7 +562,6 @@
       var l = normalizeCamLabel(c.label);
       return l.indexOf('back') >= 0 || l.indexOf('rear') >= 0 || l.indexOf('environment') >= 0 || l.indexOf('belakang') >= 0 || l.indexOf('kamera 0') >= 0;
     });
-    // Di banyak HP Android, kamera belakang sering muncul sebagai device terakhir jika label kosong/tidak jelas.
     return (back[0] || cameras[cameras.length - 1] || cameras[0]);
   }
 
@@ -473,17 +573,108 @@
         v.setAttribute('muted', 'true');
         try { v.play && v.play(); } catch (e) {}
       }
-    }, 250);
+    }, 120);
+  }
+
+  function stopNativeScanner() {
+    if (nativeLoopTimer) { clearTimeout(nativeLoopTimer); nativeLoopTimer = null; }
+    nativeDetecting = false;
+    nativeDetector = null;
+    nativeVideo = null;
+    if (nativeStream) {
+      try { nativeStream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
+    }
+    nativeStream = null;
   }
 
   function clearScannerOnly() {
+    stopNativeScanner();
     if (scanner) {
       try { scanner.clear(); } catch (e) {}
     }
     scanner = null;
   }
 
-  function startWithFallback() {
+  function startNativeFastScanner() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.BarcodeDetector) {
+      return Promise.reject(new Error('NO_NATIVE_BARCODE'));
+    }
+
+    function beginNative() {
+      setScanMessage('Membuka kamera cepat…');
+      return navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        }
+      }).then(function (stream) {
+        nativeStream = stream;
+        $('reader').innerHTML = '';
+        var video = document.createElement('video');
+        video.id = 'native-video';
+        video.setAttribute('playsinline', 'true');
+        video.setAttribute('muted', 'true');
+        video.autoplay = true;
+        video.muted = true;
+        video.srcObject = stream;
+        $('reader').appendChild(video);
+        nativeVideo = video;
+
+        // Bantu HP fokus ke QR, kalau browser mendukung.
+        try {
+          var track = stream.getVideoTracks()[0];
+          var caps = track && track.getCapabilities ? track.getCapabilities() : null;
+          var adv = [];
+          if (caps && caps.focusMode && caps.focusMode.indexOf('continuous') >= 0) adv.push({ focusMode: 'continuous' });
+          if (adv.length && track.applyConstraints) track.applyConstraints({ advanced: adv }).catch(function () {});
+        } catch (e) {}
+
+        nativeDetector = new BarcodeDetector({ formats: ['qr_code'] });
+        return video.play().catch(function () {}).then(function () {
+          setScanMessage('Arahkan QR ke dalam frame. Mode cepat aktif.');
+          nativeScanLoop();
+        });
+      });
+    }
+
+    if (BarcodeDetector.getSupportedFormats) {
+      return BarcodeDetector.getSupportedFormats().then(function (formats) {
+        if (formats && formats.indexOf('qr_code') < 0) throw new Error('QR_NOT_SUPPORTED');
+        return beginNative();
+      });
+    }
+    return beginNative();
+  }
+
+  function nativeScanLoop() {
+    if (!nativeVideo || !nativeDetector || scanBusy) return;
+    if (nativeDetecting) {
+      nativeLoopTimer = setTimeout(nativeScanLoop, 80);
+      return;
+    }
+    if (nativeVideo.readyState < 2) {
+      nativeLoopTimer = setTimeout(nativeScanLoop, 80);
+      return;
+    }
+
+    nativeDetecting = true;
+    nativeDetector.detect(nativeVideo).then(function (codes) {
+      nativeDetecting = false;
+      if (scanBusy || !nativeVideo) return;
+      if (codes && codes.length) {
+        var raw = codes[0].rawValue || codes[0].rawData || '';
+        if (raw) { onScanSuccess(raw); return; }
+      }
+      nativeLoopTimer = setTimeout(nativeScanLoop, 90);
+    }).catch(function () {
+      nativeDetecting = false;
+      nativeLoopTimer = setTimeout(nativeScanLoop, 160);
+    });
+  }
+
+  function startHtml5ScannerWithFallback() {
     var cfg = scanConfig();
 
     function startByCameraId() {
@@ -505,8 +696,6 @@
       return scanner.start({ facingMode: { ideal: 'environment' } }, cfg, onScanSuccess, function () {});
     }
 
-    // Urutan dibuat khusus untuk Android Chrome/GitHub Pages:
-    // 1) pakai cameraId dari daftar device, 2) fallback environment, 3) fallback ideal.
     return startByCameraId().catch(function () {
       return startByEnvironment();
     }).catch(function () {
@@ -514,38 +703,43 @@
     });
   }
 
+  function startScannerEngine() {
+    // Prioritaskan native BarcodeDetector karena biasanya lebih cepat membaca QR di Chrome Android.
+    return startNativeFastScanner().catch(function () {
+      scanner = new Html5Qrcode('reader', {
+        useBarCodeDetectorIfSupported: true,
+        formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE]
+      });
+      return startHtml5ScannerWithFallback().then(markVideoReady);
+    });
+  }
+
   function openScanner() {
-    if (scanStarting || scanner) return; // cegah double tap membuka kamera berkali-kali
+    if (scanStarting || scanner || nativeStream) return;
 
     show('scan-overlay', true);
     setScanMessage('Membuka kamera…');
     scanBusy = false;
     scanStarting = true;
-
-    // Bersihkan DOM reader agar start kamera lebih stabil ketika scan dibuka berulang.
     $('reader').innerHTML = '';
 
-    scanner = new Html5Qrcode('reader', {
-      useBarCodeDetectorIfSupported: true,
-      formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE]
-    });
-
-    startWithFallback().then(function () {
+    startScannerEngine().then(function () {
       scanStarting = false;
-      markVideoReady();
-      setScanMessage('Arahkan QR ke dalam frame.');
+      setScanMessage($('scan-msg').textContent || 'Arahkan QR ke dalam frame.');
     }).catch(function (err) {
       scanStarting = false;
       var code = (err && (err.name || err.message)) ? String(err.name || err.message) : '';
       clearScannerOnly();
       if (code.indexOf('NotReadable') >= 0 || code.indexOf('TrackStart') >= 0) {
-        setScanMessage('Kamera sudah diizinkan, tapi sedang dipakai/terkunci. Tutup aplikasi kamera/WhatsApp, lalu refresh dan coba lagi.');
+        setScanMessage('Kamera sudah diizinkan, tapi sedang dipakai/terkunci. Tutup Camera/WhatsApp/Instagram, lalu refresh dan coba lagi.');
+      } else if (code.indexOf('NotAllowed') >= 0 || code.indexOf('Permission') >= 0) {
+        setScanMessage('Izin kamera belum aktif. Klik ikon gembok di address bar → Camera → Allow, lalu refresh.');
       } else if (code.indexOf('NotFound') >= 0 || code.indexOf('NO_CAMERA') >= 0) {
         setScanMessage('Kamera tidak ditemukan oleh browser. Coba tutup tab lain, refresh, lalu scan lagi.');
       } else if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
-        setScanMessage('Kamera hanya bisa dibuka lewat HTTPS. Gunakan link github.io, bukan file lokal.');
+        setScanMessage('Kamera hanya bisa dibuka lewat HTTPS. Gunakan link github.io.');
       } else {
-        setScanMessage('Kamera belum bisa dibuka. Pastikan Chrome Camera = Allow, tutup tab/aplikasi lain yang memakai kamera, lalu refresh.');
+        setScanMessage('Kamera belum bisa dibuka. Pastikan Chrome Camera = Allow, tutup aplikasi lain yang memakai kamera, lalu refresh.');
       }
     });
   }
@@ -554,6 +748,7 @@
     show('scan-overlay', false);
     scanBusy = false;
     scanStarting = false;
+    stopNativeScanner();
     if (scanner) {
       var s = scanner;
       scanner = null;
@@ -562,6 +757,7 @@
       });
     }
   }
+
   function onScanSuccess(text) {
     if (scanBusy) return;
     var token = (APP.state && APP.state.qrToken) || 'BAKERZIN-BREAK';
@@ -572,7 +768,7 @@
     $('scan-flash').style.opacity = '0.7';
     setTimeout(function () { $('scan-flash').style.opacity = '0'; }, 120);
     $('scan-msg').textContent = 'QR terbaca — mencatat…';
-    api({ fn: 'scan', nik: APP.emp.nik, qr: text }).then(function (res) {
+    api({ fn: 'scan', nik: APP.emp.nik, qr: text }, { retries: 1, timeoutMs: 18000 }).then(function (res) {
       closeScanner();
       applyState(res);
       if (!res.ok) { alert(res.error); renderHome(); return; }
@@ -796,8 +992,10 @@
   });
   $('inp-nik').addEventListener('keydown', function (ev) { if (ev.key === 'Enter') $('btn-login').click(); });
   $('btn-logout').addEventListener('click', function () {
-    localStorage.removeItem('ab_nik');
+    try { api({ fn: 'logout' }, { retries: 0, timeoutMs: 5000 }).catch(function () {}); } catch (e) {}
+    clearSavedSession();
     APP.emp = null;
+    APP.session = null;
     APP.hq = { outlet: 'ALL', days: 1, tab: 'live', data: null, timer: null, tick: null };
     stopCountdown(); stopMonitorPoll(); stopHqPoll();
     show('scr-home', false); show('scr-login', true);
@@ -823,9 +1021,7 @@
       show('api-warn', true);
       return;
     }
-    var saved = localStorage.getItem('ab_nik');
-    if (saved) doLogin(saved, true);
-    else show('scr-login', true);
+    if (!restoreCachedSession()) show('scr-login', true);
   })();
 </script>
 </body>
