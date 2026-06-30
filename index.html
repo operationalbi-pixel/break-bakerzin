@@ -126,7 +126,7 @@
               background: linear-gradient(rgba(0,0,0,0.6), transparent); }
   #scan-top .t { font-weight: 700; font-size: 17px; }
   #scan-top .s { font-size: 12.5px; opacity: 0.8; margin-top: 2px; }
-  #scan-frame { position: absolute; top: 50%; left: 50%; width: min(62vw, 270px); aspect-ratio: 1;
+  #scan-frame { position: absolute; top: 50%; left: 50%; width: min(78vw, 340px); aspect-ratio: 1;
                 transform: translate(-50%, -56%); z-index: 2; pointer-events: none; }
   #scan-frame::before, #scan-frame::after, #scan-frame .c::before, #scan-frame .c::after {
     content: ''; position: absolute; width: 32px; height: 32px; border: 3px solid #fff; border-radius: 2px; }
@@ -308,10 +308,10 @@
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script>
   // ════════════════════════════════════════════════════════════
-  // GITHUB PAGES FAST VERSION v7
+  // GITHUB PAGES ULTRA FAST QR VERSION v8
   // Upload file ini sebagai index.html di root repository GitHub Pages.
   // Backend tetap Google Apps Script Web App URL (diakhiri /exec).
-  // Session tahan 30 hari di browser + server, jadi tidak perlu login ulang setiap hari.
+  // Session tahan 30 hari di browser, jadi tidak perlu login ulang setiap hari.
   var API_URL = 'https://script.google.com/macros/s/AKfycbzLiN5eUEiTL0eQzjhuGe8g0aphmukrshQbpMxHq-06bdh9iUtGUdc60wExRm3pYxixjw/exec';
   // ════════════════════════════════════════════════════════════
 
@@ -405,6 +405,9 @@
       try { localStorage.setItem('ab_state', JSON.stringify(APP.state)); } catch (e) {}
     }
     if (res.emp) {
+      // Kalau session server durable sudah lewat cache cepat, foto bisa kosong.
+      // Pertahankan foto lokal supaya UI tetap bagus tanpa perlu baca Spreadsheet lagi.
+      if (!res.emp.foto && APP.emp && APP.emp.foto) res.emp.foto = APP.emp.foto;
       APP.emp = res.emp;
       try { localStorage.setItem('ab_emp', JSON.stringify(APP.emp)); } catch (e) {}
     }
@@ -537,9 +540,10 @@
   var nativeStream = null, nativeVideo = null, nativeDetector = null, nativeLoopTimer = null, nativeDetecting = false;
 
   function scanConfig() {
-    var box = Math.round(Math.min(window.innerWidth * 0.72, 330));
+    // Area scan dibuat lebih besar + FPS tinggi supaya QR cepat terbaca.
+    var box = Math.round(Math.min(window.innerWidth * 0.82, 360));
     return {
-      fps: 18,
+      fps: 30,
       qrbox: { width: box, height: box },
       aspectRatio: 1.7777778,
       disableFlip: true,
@@ -549,6 +553,69 @@
 
   function setScanMessage(msg) {
     $('scan-msg').textContent = msg || '';
+  }
+
+  function saveStateLocal() {
+    try { localStorage.setItem('ab_state', JSON.stringify(APP.state)); } catch (e) {}
+  }
+
+  function cloneObj(o) {
+    try { return JSON.parse(JSON.stringify(o || null)); } catch (e) { return o || null; }
+  }
+
+  function buildOptimisticActive(ts) {
+    var emp = APP.emp || {};
+    var limit = (APP.state && APP.state.limitMin) || 60;
+    return {
+      id: 'LOCAL-' + ts + '-' + (emp.nik || ''),
+      nik: emp.nik || '',
+      name: emp.name || '',
+      outlet: emp.outlet || '',
+      timeOut: new Date(ts).toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', second: '2-digit' }).replace(/\./g, ':'),
+      timeIn: '',
+      tsOut: ts,
+      tsIn: 0,
+      limitMin: limit,
+      durMin: null,
+      lateMin: null,
+      mustBackTs: ts + limit * 60000,
+      mustBackAt: fmtClock(ts + limit * 60000),
+      status: 'SEDANG BREAK',
+      position: emp.position || '',
+      grade: emp.grade || '',
+      foto: emp.foto || ''
+    };
+  }
+
+  function showOptimisticScan(wasInBreak) {
+    var ts = nowSrv();
+    if (!APP.state) APP.state = {};
+
+    if (wasInBreak && APP.state.activeBreak) {
+      var b = APP.state.activeBreak;
+      var limit = Number(b.limitMin || APP.state.limitMin || 60);
+      var durMin = Math.max(0, Math.round((ts - Number(b.tsOut || ts)) / 60000 * 10) / 10);
+      var lateMin = Math.max(0, Math.ceil((ts - Number(b.tsOut || ts) - limit * 60000) / 60000));
+      var status = lateMin > 0 ? 'TERLAMBAT' : 'TEPAT WAKTU';
+      APP.state.activeBreak = null;
+      APP.state.usedToday = APP.state.maxPerDay || 1;
+      APP.state.serverNow = ts;
+      saveStateLocal();
+      showResult({
+        timeOut: b.timeOut || fmtClock(Number(b.tsOut || ts)),
+        timeIn: new Date(ts).toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', second: '2-digit' }).replace(/\./g, ':'),
+        durMin: durMin,
+        lateMin: lateMin,
+        status: status,
+        limitMin: limit
+      });
+      return;
+    }
+
+    APP.state.activeBreak = buildOptimisticActive(ts);
+    APP.state.serverNow = ts;
+    saveStateLocal();
+    renderHome();
   }
 
   function normalizeCamLabel(label) {
@@ -607,7 +674,8 @@
         video: {
           facingMode: { ideal: 'environment' },
           width: { ideal: 1280 },
-          height: { ideal: 720 }
+          height: { ideal: 720 },
+          frameRate: { ideal: 30, max: 30 }
         }
       }).then(function (stream) {
         nativeStream = stream;
@@ -628,12 +696,18 @@
           var caps = track && track.getCapabilities ? track.getCapabilities() : null;
           var adv = [];
           if (caps && caps.focusMode && caps.focusMode.indexOf('continuous') >= 0) adv.push({ focusMode: 'continuous' });
+          if (caps && caps.exposureMode && caps.exposureMode.indexOf('continuous') >= 0) adv.push({ exposureMode: 'continuous' });
+          if (caps && caps.whiteBalanceMode && caps.whiteBalanceMode.indexOf('continuous') >= 0) adv.push({ whiteBalanceMode: 'continuous' });
+          if (caps && caps.zoom) {
+            var z = Math.min(caps.zoom.max || 1, Math.max(caps.zoom.min || 1, 1.2));
+            adv.push({ zoom: z });
+          }
           if (adv.length && track.applyConstraints) track.applyConstraints({ advanced: adv }).catch(function () {});
         } catch (e) {}
 
         nativeDetector = new BarcodeDetector({ formats: ['qr_code'] });
         return video.play().catch(function () {}).then(function () {
-          setScanMessage('Arahkan QR ke dalam frame. Mode cepat aktif.');
+          setScanMessage('Arahkan QR ke frame. Begitu terbaca, proses langsung jalan.');
           nativeScanLoop();
         });
       });
@@ -651,11 +725,11 @@
   function nativeScanLoop() {
     if (!nativeVideo || !nativeDetector || scanBusy) return;
     if (nativeDetecting) {
-      nativeLoopTimer = setTimeout(nativeScanLoop, 80);
+      nativeLoopTimer = setTimeout(nativeScanLoop, 25);
       return;
     }
     if (nativeVideo.readyState < 2) {
-      nativeLoopTimer = setTimeout(nativeScanLoop, 80);
+      nativeLoopTimer = setTimeout(nativeScanLoop, 25);
       return;
     }
 
@@ -667,10 +741,12 @@
         var raw = codes[0].rawValue || codes[0].rawData || '';
         if (raw) { onScanSuccess(raw); return; }
       }
-      nativeLoopTimer = setTimeout(nativeScanLoop, 90);
+      // Loop sangat cepat: target terbaca <1 detik saat QR sudah masuk frame.
+      if (window.requestAnimationFrame) requestAnimationFrame(nativeScanLoop);
+      else nativeLoopTimer = setTimeout(nativeScanLoop, 30);
     }).catch(function () {
       nativeDetecting = false;
-      nativeLoopTimer = setTimeout(nativeScanLoop, 160);
+      nativeLoopTimer = setTimeout(nativeScanLoop, 80);
     });
   }
 
@@ -762,22 +838,53 @@
     if (scanBusy) return;
     var token = (APP.state && APP.state.qrToken) || 'BAKERZIN-BREAK';
     text = String(text).trim();
-    if (text.indexOf(token) !== 0) { $('scan-msg').textContent = 'QR tidak dikenal — arahkan ke sticker QR Absensi Break.'; return; }
+    if (text.indexOf(token) !== 0) {
+      $('scan-msg').textContent = 'QR tidak dikenal — arahkan ke sticker QR Absensi Break.';
+      return;
+    }
+
     scanBusy = true;
+    var prevState = cloneObj(APP.state);
+    var wasInBreak = !!(APP.state && APP.state.activeBreak);
+
     if (navigator.vibrate) navigator.vibrate(80);
-    $('scan-flash').style.opacity = '0.7';
-    setTimeout(function () { $('scan-flash').style.opacity = '0'; }, 120);
-    $('scan-msg').textContent = 'QR terbaca — mencatat…';
-    api({ fn: 'scan', nik: APP.emp.nik, qr: text }, { retries: 1, timeoutMs: 18000 }).then(function (res) {
+    $('scan-flash').style.opacity = '0.85';
+    setTimeout(function () { $('scan-flash').style.opacity = '0'; }, 90);
+    $('scan-msg').textContent = wasInBreak ? 'QR terbaca — menyelesaikan break…' : 'QR terbaca — mulai countdown…';
+
+    // UI langsung berubah tanpa menunggu BigQuery, supaya terasa <1 detik.
+    setTimeout(function () {
       closeScanner();
+      showOptimisticScan(wasInBreak);
+    }, 60);
+
+    api({ fn: 'scan', nik: APP.emp.nik, qr: text }, { retries: 1, timeoutMs: 18000 }).then(function (res) {
       applyState(res);
-      if (!res.ok) { alert(res.error); renderHome(); return; }
-      if (res.action === 'IN') showResult(res.result); else renderHome();
+      if (!res.ok) {
+        alert(res.error || 'Gagal mencatat scan.');
+        renderHome();
+        return;
+      }
+      // Sinkronkan hasil final dari server setelah BigQuery selesai.
+      if (res.action === 'IN' && res.result) showResult(res.result);
+      else renderHome();
     }).catch(function (e) {
-      scanBusy = false;
-      $('scan-msg').textContent = 'Gagal mencatat: ' + e.message + ' — coba lagi.';
+      // Kalau simpan gagal, ambil ulang state dari server. Jika gagal juga, kembalikan tampilan sebelumnya.
+      api({ fn: 'state' }, { retries: 0, timeoutMs: 12000 }).then(function (r) {
+        if (r && r.ok) applyState(r);
+        else APP.state = prevState;
+        saveStateLocal();
+        renderHome();
+        alert('QR terbaca, tapi gagal menyimpan: ' + e.message + '. Silakan scan ulang.');
+      }).catch(function () {
+        APP.state = prevState;
+        saveStateLocal();
+        renderHome();
+        alert('QR terbaca, tapi koneksi ke server gagal: ' + e.message + '. Silakan scan ulang.');
+      });
     });
   }
+
   function showResult(r) {
     stopCountdown();
     show('box-active', false); show('box-start', false); show('box-blocked', false);
