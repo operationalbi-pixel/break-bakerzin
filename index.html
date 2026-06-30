@@ -103,8 +103,12 @@
 
   /* scanner */
   #scan-overlay { position: fixed; inset: 0; background: #000; z-index: 60; display: flex; flex-direction: column; }
-  #reader { flex: 1; overflow: hidden; }
-  #reader video { width: 100% !important; height: 100% !important; object-fit: cover; }
+  #reader { flex: 1; overflow: hidden; background: #000; }
+  #reader, #reader > div, #reader__scan_region { width: 100% !important; height: 100% !important; border: 0 !important; }
+  #reader video, #reader__scan_region video { width: 100% !important; height: 100% !important; object-fit: cover; }
+  /* Sembunyikan frame bawaan html5-qrcode agar frame scanner hanya satu */
+  #qr-shaded-region, #reader #qr-shaded-region { display: none !important; border: 0 !important; box-shadow: none !important; }
+  #reader__dashboard, #reader__dashboard_section, #reader__dashboard_section_csr { display: none !important; }
   #scan-top { position: absolute; top: 0; left: 0; right: 0; padding: 20px; text-align: center; color: #fff; z-index: 2;
               background: linear-gradient(rgba(0,0,0,0.6), transparent); }
   #scan-top .t { font-weight: 700; font-size: 17px; }
@@ -415,23 +419,68 @@
   function stopCountdown() { if (APP.timer) { clearInterval(APP.timer); APP.timer = null; } }
 
   // ── SCANNER ───────────────────────────────────────────
-  var scanner = null, scanBusy = false;
+  var scanner = null, scanBusy = false, scannerStarting = false;
+
   function openScanner() {
+    // cegah double tap membuat kamera start dua kali
+    if (scannerStarting || scanner) return;
+
     show('scan-overlay', true);
-    $('scan-msg').textContent = '';
+    $('scan-msg').textContent = 'Membuka kamera…';
+    $('reader').innerHTML = '';
     scanBusy = false;
-    scanner = new Html5Qrcode('reader', { useBarCodeDetectorIfSupported: true, formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE] });
-    scanner.start(
-      { facingMode: 'environment' },
-      { fps: 30, qrbox: function (w, h) { var m = Math.min(w, h); return { width: m * 0.7, height: m * 0.7 }; } },
-      onScanSuccess, function () {}
-    ).catch(function () {
-      $('scan-msg').textContent = 'Kamera tidak bisa diakses — izinkan kamera untuk situs ini, lalu coba lagi.';
-    });
+    scannerStarting = true;
+
+    try {
+      scanner = new Html5Qrcode('reader', {
+        formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
+        experimentalFeatures: { useBarCodeDetectorIfSupported: true }
+      });
+
+      scanner.start(
+        { facingMode: { ideal: 'environment' } },
+        {
+          fps: 12,
+          disableFlip: true,
+          aspectRatio: 1.333334,
+          qrbox: function (w, h) {
+            var m = Math.min(w, h);
+            var box = Math.min(300, Math.floor(m * 0.72));
+            return { width: box, height: box };
+          }
+        },
+        onScanSuccess,
+        function () {}
+      ).then(function () {
+        scannerStarting = false;
+        $('scan-msg').textContent = 'Arahkan kamera ke QR';
+      }).catch(function () {
+        scannerStarting = false;
+        scanner = null;
+        $('reader').innerHTML = '';
+        $('scan-msg').textContent = 'Kamera tidak bisa diakses — izinkan kamera untuk situs ini, lalu coba lagi.';
+      });
+    } catch (e) {
+      scannerStarting = false;
+      scanner = null;
+      $('scan-msg').textContent = 'Scanner gagal dibuka — refresh halaman lalu coba lagi.';
+    }
   }
+
   function closeScanner() {
     show('scan-overlay', false);
-    if (scanner) { var s = scanner; scanner = null; s.stop().then(function () { s.clear(); }).catch(function () {}); }
+    scannerStarting = false;
+    scanBusy = false;
+    if (scanner) {
+      var s = scanner;
+      scanner = null;
+      Promise.resolve()
+        .then(function () { return s.stop(); })
+        .catch(function () {})
+        .then(function () { try { s.clear(); } catch (e) {} $('reader').innerHTML = ''; });
+    } else {
+      $('reader').innerHTML = '';
+    }
   }
   function onScanSuccess(text) {
     if (scanBusy) return;
