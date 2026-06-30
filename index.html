@@ -312,7 +312,7 @@
   // Upload file ini sebagai index.html di root repository GitHub Pages.
   // Backend tetap Google Apps Script Web App URL (diakhiri /exec).
   // Session tahan 30 hari di browser, jadi tidak perlu login ulang setiap hari.
-  var API_URL = 'https://script.google.com/macros/s/AKfycbzLiN5eUEiTL0eQzjhuGe8g0aphmukrshQbpMxHq-06bdh9iUtGUdc60wExRm3pYxixjw/exec';
+  var API_URL = 'https://script.google.com/macros/s/AKfycbyotn6ohq5-cKfWma-jiyyNEOJxCKhblBIZjKsODrv8ezKq5Hc5GhgZgoTNUOZIpDXACQ/exec';
   // ════════════════════════════════════════════════════════════
 
   var APP = { emp: null, state: null, session: null, offset: 0, timer: null, monTimer: null, monTick: null,
@@ -421,10 +421,23 @@
   }
 
   // ── LOGIN ─────────────────────────────────────────────
+  function syncStateInBackground() {
+    api({ fn: 'state' }, { retries: 0, timeoutMs: 12000 }).then(function (res) {
+      if (!res.ok) return;
+      applyState(res);
+      renderHome();
+    }).catch(function () {
+      // Tidak membuat user stuck. State akan tersinkron saat scan/refresh berikutnya.
+    });
+  }
+
   function doLogin(nik, silent) {
     var btn = $('btn-login');
-    if (!silent) busy(btn, true, 'Mencari NIK…');
-    api({ fn: 'login', nik: nik }, { retries: 2, timeoutMs: 30000 }).then(function (res) {
+    if (!silent) busy(btn, true, 'Masuk…');
+
+    // Target login cepat: maksimal 5 detik untuk validasi & masuk halaman.
+    // BigQuery state/history tidak ditunggu di sini; disinkronkan di background.
+    api({ fn: 'login', nik: nik, fast: true }, { retries: 0, timeoutMs: 5000 }).then(function (res) {
       busy(btn, false);
       if (!res.ok) { $('login-err').textContent = res.error; show('scr-login', true); return; }
       APP.emp = res.emp;
@@ -434,14 +447,17 @@
       try { localStorage.setItem('ab_emp', JSON.stringify(res.emp)); } catch (e) {}
       $('login-err').textContent = '';
       renderHome();
+      syncStateInBackground();
     }).catch(function (e) {
       busy(btn, false);
-      $('login-err').textContent = 'Gagal terhubung: ' + e.message;
+      // Kalau user pernah login di HP ini, tetap masuk dari session lokal walaupun request login lambat.
+      if (restoreCachedSession(nik)) return;
+      $('login-err').textContent = 'Login melewati 5 detik. Coba lagi, atau jalankan warmEmployeeIndex di Apps Script setelah deploy.';
       show('scr-login', true);
     });
   }
 
-  function restoreCachedSession() {
+  function restoreCachedSession(onlyNik) {
     var savedSession = localStorage.getItem('ab_session');
     var savedEmp = parseJsonSafe(localStorage.getItem('ab_emp'), null);
     var savedState = parseJsonSafe(localStorage.getItem('ab_state'), null);
@@ -449,6 +465,7 @@
     var maxAge = 30 * 24 * 60 * 60 * 1000; // session tahan 30 hari selama tidak logout / data browser tidak dihapus
 
     if (!savedSession || !savedEmp || !savedState || !loginAt || Date.now() - loginAt > maxAge) return false;
+    if (onlyNik && String(savedEmp.nik || '').toUpperCase() !== String(onlyNik || '').toUpperCase()) return false;
 
     APP.session = savedSession;
     APP.emp = savedEmp;
@@ -458,13 +475,7 @@
     renderHome();
 
     // Refresh status dari BigQuery tanpa membaca Spreadsheet lagi.
-    api({ fn: 'state' }, { retries: 1, timeoutMs: 22000 }).then(function (res) {
-      if (!res.ok) return;
-      applyState(res);
-      renderHome();
-    }).catch(function () {
-      // Kalau koneksi sedang jelek, tetap tampilkan cache agar user tidak stuck di halaman login.
-    });
+    syncStateInBackground();
 
     return true;
   }
@@ -498,6 +509,8 @@
 
     // panel sesuai peran
     var canDashboard = !!(s.isHq || s.canMonitor);
+    // Saat login cepat, state awal belum hasil BigQuery. Tahan load dashboard sampai sync background selesai agar login tetap ringan.
+    if (s.pendingSync) canDashboard = false;
     $('home-col').classList.toggle('wide', canDashboard);
     show('box-hq', canDashboard);
     show('box-monitor', false); // panel lama tetap ada, tetapi dashboard baru dipakai untuk BIHQ dan Grade 3+
