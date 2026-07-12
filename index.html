@@ -251,7 +251,7 @@
 
     <!-- HQ dashboard -->
     <div id="box-hq" class="stack hidden">
-      <div class="section"><span class="t" id="hq-title">Semua Outlet</span></div>
+      <div class="section"><span class="t" id="hq-title">Semua Outlet</span><span id="hq-updated" class="muted" style="font-size:11px;float:right;margin-top:3px;"></span></div>
       <div class="chips" id="hq-chips"></div>
       <div class="seg" id="hq-tabs">
         <button data-tab="live" class="on">Sedang Break</button>
@@ -308,7 +308,7 @@
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script>
   // ════════════════════════════════════════════════════════════
-  // GITHUB PAGES ULTRA FAST QR VERSION v8
+  // GITHUB PAGES ULTRA FAST QR VERSION v10 — Optimized BigQuery cost
   // Upload file ini sebagai index.html di root repository GitHub Pages.
   // Backend tetap Google Apps Script Web App URL (diakhiri /exec).
   // Session tahan 30 hari di browser, jadi tidak perlu login ulang setiap hari.
@@ -316,7 +316,8 @@
   // ════════════════════════════════════════════════════════════
 
   var APP = { emp: null, state: null, session: null, offset: 0, timer: null, monTimer: null, monTick: null,
-              lastMon: null, hq: { outlet: 'ALL', days: 1, tab: 'live', data: null, timer: null, tick: null } };
+              lastMon: null, hq: { outlet: 'ALL', days: 1, tab: 'live', data: null, timer: null, tick: null, lastLoadAt: 0 },
+              _syncDone: false };
 
   function $(id) { return document.getElementById(id); }
   function show(id, on) { $(id).classList.toggle('hidden', !on); }
@@ -338,6 +339,7 @@
   }
 
   function sleep(ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); }
+  function debounce(fn, ms) { var t; return function () { var a = arguments, c = this; clearTimeout(t); t = setTimeout(function () { fn.apply(c, a); }, ms); }; }
 
   function clearSavedSession() {
     localStorage.removeItem('ab_nik');
@@ -435,24 +437,23 @@
     var btn = $('btn-login');
     if (!silent) busy(btn, true, 'Masuk…');
 
-    // Target login cepat: maksimal 5 detik untuk validasi & masuk halaman.
-    // BigQuery state/history tidak ditunggu di sini; disinkronkan di background.
-    api({ fn: 'login', nik: nik, fast: true }, { retries: 0, timeoutMs: 5000 }).then(function (res) {
+    // Target login cepat: timeout 15 detik, BigQuery state/history disinkron di background.
+    api({ fn: 'login', nik: nik, fast: true }, { retries: 0, timeoutMs: 15000 }).then(function (res) {
       busy(btn, false);
       if (!res.ok) { $('login-err').textContent = res.error; show('scr-login', true); return; }
       APP.emp = res.emp;
       APP.session = res.session || null;
       applyState(res);
+      APP._syncDone = true;
       localStorage.setItem('ab_nik', res.emp.nik);
       try { localStorage.setItem('ab_emp', JSON.stringify(res.emp)); } catch (e) {}
       $('login-err').textContent = '';
       renderHome();
-      syncStateInBackground();
     }).catch(function (e) {
       busy(btn, false);
       // Kalau user pernah login di HP ini, tetap masuk dari session lokal walaupun request login lambat.
       if (restoreCachedSession(nik)) return;
-      $('login-err').textContent = 'Login melewati 5 detik. Coba lagi, atau jalankan warmEmployeeIndex di Apps Script setelah deploy.';
+      $('login-err').textContent = 'Login melewati 15 detik. Coba lagi, atau jalankan warmEmployeeIndex di Apps Script setelah deploy.';
       show('scr-login', true);
     });
   }
@@ -474,8 +475,11 @@
 
     renderHome();
 
-    // Refresh status dari BigQuery tanpa membaca Spreadsheet lagi.
-    syncStateInBackground();
+    // Hanya sinkron dari server sekali per sesi untuk hemat BigQuery.
+    if (!APP._syncDone) {
+      APP._syncDone = true;
+      syncStateInBackground();
+    }
 
     return true;
   }
@@ -882,19 +886,11 @@
       if (res.action === 'IN' && res.result) showResult(res.result);
       else renderHome();
     }).catch(function (e) {
-      // Kalau simpan gagal, ambil ulang state dari server. Jika gagal juga, kembalikan tampilan sebelumnya.
-      api({ fn: 'state' }, { retries: 0, timeoutMs: 12000 }).then(function (r) {
-        if (r && r.ok) applyState(r);
-        else APP.state = prevState;
-        saveStateLocal();
-        renderHome();
-        alert('QR terbaca, tapi gagal menyimpan: ' + e.message + '. Silakan scan ulang.');
-      }).catch(function () {
-        APP.state = prevState;
-        saveStateLocal();
-        renderHome();
-        alert('QR terbaca, tapi koneksi ke server gagal: ' + e.message + '. Silakan scan ulang.');
-      });
+      // Simpan query BigQuery — langsung revert ke state sebelumnya tanpa query tambahan.
+      APP.state = prevState;
+      saveStateLocal();
+      renderHome();
+      alert('QR terbaca, tapi koneksi gagal: ' + e.message + '. Silakan scan ulang.');
     });
   }
 
@@ -957,7 +953,7 @@
   }
   function startMonitorPoll() {
     stopMonitorPoll();
-    APP.monTimer = setInterval(loadMonitor, 30000);
+    APP.monTimer = setInterval(loadMonitor, 90000);
     APP.monTick = setInterval(renderMonitor, 1000);
   }
   function stopMonitorPoll() {
@@ -973,6 +969,8 @@
       APP.offset = res.serverNow - Date.now();
       APP.hq.data = res;
       APP.hq.outlet = res.outletFilter || outletReq;
+      APP.hq.lastLoadAt = Date.now();
+      $('hq-updated').textContent = 'Diperbarui ' + fmtClock(Date.now());
       renderHqChips(res.outlets);
       renderHq();
     }).catch(function (e) {
@@ -990,8 +988,9 @@
       html += '<button class="chip' + (APP.hq.outlet === o ? ' on' : '') + '" data-outlet="' + esc(o) + '">' + esc(o) + '</button>';
     });
     $('hq-chips').innerHTML = html;
+    var debouncedLoadHq = debounce(loadHq, 1500);
     Array.prototype.forEach.call($('hq-chips').querySelectorAll('.chip'), function (c) {
-      c.addEventListener('click', function () { APP.hq.outlet = this.dataset.outlet; loadHq(); });
+      c.addEventListener('click', function () { APP.hq.outlet = this.dataset.outlet; debouncedLoadHq(); });
     });
   }
   function renderHq() {
@@ -1034,7 +1033,7 @@
   }
   function startHqPoll() {
     stopHqPoll();
-    APP.hq.timer = setInterval(loadHq, 30000);
+    APP.hq.timer = setInterval(loadHq, 90000);
     APP.hq.tick = setInterval(function () { if (APP.hq.tab === 'live') renderHq(); }, 1000);
   }
   function stopHqPoll() {
@@ -1048,11 +1047,12 @@
       renderHq();
     });
   });
+  var debouncedDaysHq = debounce(loadHq, 1500);
   Array.prototype.forEach.call($('hq-days').querySelectorAll('button'), function (b) {
     b.addEventListener('click', function () {
       APP.hq.days = Number(this.dataset.days);
       Array.prototype.forEach.call($('hq-days').querySelectorAll('button'), function (x) { x.classList.toggle('on', x === b); });
-      loadHq();
+      debouncedDaysHq();
     });
   });
 
@@ -1116,7 +1116,8 @@
     clearSavedSession();
     APP.emp = null;
     APP.session = null;
-    APP.hq = { outlet: 'ALL', days: 1, tab: 'live', data: null, timer: null, tick: null };
+    APP.hq = { outlet: 'ALL', days: 1, tab: 'live', data: null, timer: null, tick: null, lastLoadAt: 0 };
+    APP._syncDone = false;
     stopCountdown(); stopMonitorPoll(); stopHqPoll();
     show('scr-home', false); show('scr-login', true);
   });
