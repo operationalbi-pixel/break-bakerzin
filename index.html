@@ -149,6 +149,17 @@
   .spin { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.4);
           border-top-color: #fff; border-radius: 50%; animation: sp 0.7s linear infinite; vertical-align: -2px; }
   @keyframes sp { to { transform: rotate(360deg); } }
+
+  /* ── modal laporan PDF ── */
+  #rpt-modal input[type=date] { font-family: var(--sans); font-size: 14px; padding: 10px 12px;
+    border: 1px solid var(--hair); border-radius: 10px; background: var(--bg); color: var(--ink); width: 100%; }
+  #rpt-modal input[type=date]:focus { outline: 2px solid var(--accent); border-color: var(--accent); }
+  .rpt-row { display: flex; gap: 10px; align-items: center; }
+  .rpt-row span { font-size: 13px; color: var(--muted); white-space: nowrap; }
+  #btn-rpt { background: var(--accent); color: #fff; border: none; border-radius: 12px; padding: 12px 24px;
+    font-family: var(--sans); font-weight: 700; font-size: 14px; cursor: pointer; width: 100%; margin-top: 4px; }
+  #btn-rpt:disabled { opacity: 0.5; cursor: not-allowed; }
+  #btn-rpt:not(:disabled):hover { filter: brightness(1.1); }
 </style>
 </head>
 <body>
@@ -264,6 +275,7 @@
         <button data-days="30">30 Hari</button>
       </div>
       <div id="hq-list" class="stack"></div>
+      <div style="padding-top: 4px;"><button class="mini-btn" id="btn-rpt-open" style="color: var(--accent);">Laporan PDF</button></div>
     </div>
 
     <!-- riwayat pribadi -->
@@ -305,6 +317,24 @@
   </div>
 </div>
 
+<!-- MODAL laporan PDF -->
+<div id="rpt-modal" class="hidden">
+  <div class="box" style="max-width: 380px;">
+    <div class="head">
+      <div style="font-weight: 700; font-size: 15.5px;">Laporan Absensi Break</div>
+      <button class="mini-btn" id="rpt-close">Tutup</button>
+    </div>
+    <div class="body" style="display: flex; flex-direction: column; gap: 12px;">
+      <div class="rpt-row"><span>Dari</span><input type="date" id="rpt-from"></div>
+      <div class="rpt-row"><span>Sampai</span><input type="date" id="rpt-to"></div>
+      <button id="btn-rpt">Buat Laporan PDF</button>
+      <div id="rpt-err" style="color: var(--late); font-size: 12px; text-align: center; min-height: 16px;"></div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script>
   // ════════════════════════════════════════════════════════════
@@ -312,7 +342,7 @@
   // Upload file ini sebagai index.html di root repository GitHub Pages.
   // Backend tetap Google Apps Script Web App URL (diakhiri /exec).
   // Session tahan 30 hari di browser, jadi tidak perlu login ulang setiap hari.
-  var API_URL = 'https://script.google.com/macros/s/AKfycbyotn6ohq5-cKfWma-jiyyNEOJxCKhblBIZjKsODrv8ezKq5Hc5GhgZgoTNUOZIpDXACQ/exec';
+  var API_URL = 'https://script.google.com/macros/s/AKfycbyQ9IUH_MgDsyF4ykF86tCBTmE3zmA_qUAqeeJMsRBsQl6f450FxL-tvcKqd7iGNXX_Lg/exec';
   // ════════════════════════════════════════════════════════════
 
   var APP = { emp: null, state: null, session: null, offset: 0, timer: null, monTimer: null, monTick: null,
@@ -1103,6 +1133,159 @@
     }).catch(function (e) { $('box-hist').innerHTML = '<div class="empty">Gagal memuat: ' + esc(e.message) + '</div>'; });
   }
 
+  // ── LAPORAN PDF ───────────────────────────────────────
+  // Backend harus menyediakan: fn='breakreport' → { ok, staff: [{ name, position, outlet, records: { "YYYY-MM-DD": null | { status:"ontime" } | { status:"late", lateMin:N } } }] }
+  function openReportModal() {
+    var today = new Date();
+    var weekAgo = new Date(today); weekAgo.setDate(weekAgo.getDate() - 6);
+    $('rpt-from').value = fmtDateISO(weekAgo);
+    $('rpt-to').value = fmtDateISO(today);
+    $('rpt-err').textContent = '';
+    $('btn-rpt').disabled = false;
+    $('btn-rpt').textContent = 'Buat Laporan PDF';
+    show('rpt-modal', true);
+  }
+
+  function fmtDateISO(d) {
+    var y = d.getFullYear(), m = pad(d.getMonth() + 1), dd = pad(d.getDate());
+    return y + '-' + m + '-' + dd;
+  }
+
+  function fmtDateID(str) {
+    var d = new Date(str + 'T00:00:00');
+    var months = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+    return d.getDate() + ' ' + months[d.getMonth()] + ' ' + d.getFullYear();
+  }
+
+  function generateDateRange(from, to) {
+    var dates = [], d = new Date(from + 'T00:00:00'), end = new Date(to + 'T00:00:00');
+    while (d <= end) { dates.push(fmtDateISO(d)); d.setDate(d.getDate() + 1); }
+    return dates;
+  }
+
+  function generateReport() {
+    var dateFrom = $('rpt-from').value, dateTo = $('rpt-to').value;
+    if (!dateFrom || !dateTo) { $('rpt-err').textContent = 'Pilih tanggal dari dan sampai.'; return; }
+    if (dateFrom > dateTo) { $('rpt-err').textContent = 'Tanggal dari harus sebelum tanggal sampai.'; return; }
+    var dayDiff = Math.round((new Date(dateTo) - new Date(dateFrom)) / 86400000) + 1;
+    if (dayDiff > 31) { $('rpt-err').textContent = 'Maksimal 31 hari.'; return; }
+
+    var outlet = (APP.state && APP.state.isHq) ? APP.hq.outlet : (APP.emp ? APP.emp.outlet : '');
+    var btn = $('btn-rpt');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spin" style="border-color:rgba(255,255,255,0.3);border-top-color:#fff;"></span> Mengambil data…';
+    $('rpt-err').textContent = '';
+
+    api({ fn: 'breakreport', nik: APP.emp.nik, dateFrom: dateFrom, dateTo: dateTo, outlet: outlet }, { retries: 0, timeoutMs: 30000 })
+      .then(function (res) {
+        btn.disabled = false;
+        btn.textContent = 'Buat Laporan PDF';
+        if (!res.ok) { $('rpt-err').textContent = res.error || 'Gagal mengambil data.'; return; }
+        show('rpt-modal', false);
+        buildPdf(res, dateFrom, dateTo, outlet);
+      }).catch(function (e) {
+        btn.disabled = false;
+        btn.textContent = 'Buat Laporan PDF';
+        $('rpt-err').textContent = 'Gagal: ' + e.message;
+      });
+  }
+
+  function buildPdf(data, dateFrom, dateTo, outlet) {
+    if (!window.jspdf || !window.jspdf.jsPDF) { alert('Library PDF belum dimuat. Refresh halaman.'); return; }
+    var jsPDF = window.jspdf.jsPDF;
+    var doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+
+    var dates = generateDateRange(dateFrom, dateTo);
+    var staff = data.staff || [];
+    var numDates = dates.length;
+    var isMany = numDates > 16;
+
+    // ── Title ──
+    doc.setFontSize(15);
+    doc.setFont('helvetica', 'bold');
+    doc.text('LAPORAN ABSENSI BREAK', 148.5, 14, { align: 'center' });
+
+    doc.setFontSize(8.5);
+    doc.setFont('helvetica', 'normal');
+    var periodeStr = fmtDateID(dateFrom) + ' \u2014 ' + fmtDateID(dateTo);
+    var outletStr = (outlet === 'ALL') ? 'Semua Outlet' : 'Outlet ' + outlet;
+    doc.text('Periode: ' + periodeStr + '   |   ' + outletStr + '   |   ' + staff.length + ' staff', 148.5, 20, { align: 'center' });
+
+    // ── Legend ──
+    var legendY = 24;
+    doc.setFontSize(7);
+    doc.setTextColor(44, 122, 75);  doc.text('\u2713  Tepat Waktu', 14, legendY);
+    doc.setTextColor(180, 130, 20); doc.text('\u25CF  Tidak Ada Break', 75, legendY);
+    doc.setTextColor(179, 38, 30);  doc.text('+X mnt  Terlambat', 135, legendY);
+    doc.setTextColor(0);
+
+    // ── Table headers ──
+    var headers = ['No', 'Nama', 'Posisi'];
+    var dateHeaders = dates.map(function (d) {
+      var dt = new Date(d + 'T00:00:00');
+      return pad(dt.getDate()) + '/' + pad(dt.getMonth() + 1);
+    });
+
+    // ── Table body ──
+    var body = [];
+    staff.forEach(function (s, i) {
+      var row = [
+        { content: String(i + 1), styles: { halign: 'center', fontSize: isMany ? 6.5 : 7.5 } },
+        { content: s.name, styles: { fontSize: isMany ? 6.5 : 7.5 } },
+        { content: s.position || '-', styles: { fontSize: isMany ? 6.5 : 7.5 } }
+      ];
+      dates.forEach(function (d) {
+        var rec = (s.records && s.records[d]) || null;
+        var cell;
+        if (!rec) {
+          cell = { content: '\u25CF', styles: { textColor: [180, 130, 20], halign: 'center', fontSize: isMany ? 8 : 11, fontStyle: 'bold' } };
+        } else if (rec.status === 'late') {
+          cell = { content: '+' + (rec.lateMin || 0) + ' mnt', styles: { textColor: [179, 38, 30], halign: 'center', fontSize: isMany ? 5.5 : 6.5, fontStyle: 'bold' } };
+        } else {
+          cell = { content: '\u2713', styles: { textColor: [44, 122, 75], halign: 'center', fontSize: isMany ? 8 : 11, fontStyle: 'bold' } };
+        }
+        row.push(cell);
+      });
+      body.push(row);
+    });
+
+    // ── Column widths ──
+    var fixedW = [8, 36, 26]; // No, Nama, Posisi
+    var availW = 277 - 10 - 10; // landscape A4 usable width minus margins
+    for (var k = 0; k < fixedW.length; k++) availW -= fixedW[k];
+    var dateW = availW / numDates;
+
+    var colStyles = { 0: { cellWidth: fixedW[0], halign: 'center' }, 1: { cellWidth: fixedW[1] }, 2: { cellWidth: fixedW[2] } };
+    for (var c = 0; c < numDates; c++) colStyles[3 + c] = { cellWidth: dateW, halign: 'center' };
+
+    // ── Draw table ──
+    doc.autoTable({
+      head: [headers.concat(dateHeaders)],
+      body: body,
+      startY: 27,
+      styles: { fontSize: isMany ? 6.5 : 7.5, cellPadding: { top: 1.2, bottom: 1.2, left: 1, right: 1 }, lineColor: [200, 195, 185], lineWidth: 0.15 },
+      headStyles: { fillColor: [168, 19, 37], textColor: [255, 255, 255], fontSize: isMany ? 6 : 7, halign: 'center', fontStyle: 'bold' },
+      alternateRowStyles: { fillColor: [248, 247, 244] },
+      columnStyles: colStyles,
+      margin: { left: 10, right: 10 },
+      theme: 'grid',
+      tableWidth: 'auto'
+    });
+
+    // ── Footer on every page ──
+    var pageCount = doc.internal.getNumberOfPages();
+    for (var p = 1; p <= pageCount; p++) {
+      doc.setPage(p);
+      doc.setFontSize(6.5);
+      doc.setTextColor(138, 131, 120);
+      var ph = doc.internal.pageSize.height;
+      doc.text('Dicetak: ' + new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' }) + '  |  Bakerzin Cafe \u2014 Laporan Absensi Break', 148.5, ph - 4, { align: 'center' });
+      doc.text('Halaman ' + p + ' / ' + pageCount, 148.5, ph - 8, { align: 'center' });
+    }
+
+    doc.save('Laporan_Break_' + dateFrom + '_' + dateTo + '.pdf');
+  }
+
   // ── EVENTS ────────────────────────────────────────────
   $('btn-login').addEventListener('click', function () {
     var nik = $('inp-nik').value.trim();
@@ -1125,6 +1308,10 @@
   $('btn-scan-in').addEventListener('click', openScanner);
   $('btn-scan-cancel').addEventListener('click', closeScanner);
   $('btn-result-ok').addEventListener('click', renderHome);
+  $('btn-rpt-open').addEventListener('click', openReportModal);
+  $('rpt-close').addEventListener('click', function () { show('rpt-modal', false); });
+  $('rpt-modal').addEventListener('click', function (ev) { if (ev.target === this) show('rpt-modal', false); });
+  $('btn-rpt').addEventListener('click', generateReport);
   $('btn-mon-refresh').addEventListener('click', loadMonitor);
 
   var histShown = false;
