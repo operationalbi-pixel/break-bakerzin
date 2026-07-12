@@ -1119,65 +1119,112 @@
     show('modal-report', true);
   }
 
+  // Font bawaan jsPDF (helvetica) tidak punya glyph ✓ / ● — makanya sebelumnya
+  // muncul karakter aneh di PDF. Jadi ikon digambar manual pakai vector (garis & lingkaran).
+  function _pdfDrawCheck(doc, cx, cy, r, color) {
+    doc.setDrawColor(color[0], color[1], color[2]);
+    doc.setLineWidth(Math.max(1, r * 0.34));
+    if (doc.setLineCap) doc.setLineCap('round');
+    if (doc.setLineJoin) doc.setLineJoin('round');
+    doc.line(cx - r * 0.75, cy + r * 0.05, cx - r * 0.15, cy + r * 0.6);
+    doc.line(cx - r * 0.15, cy + r * 0.6, cx + r * 0.8, cy - r * 0.55);
+  }
+  function _pdfDrawDot(doc, cx, cy, r, color) {
+    doc.setFillColor(color[0], color[1], color[2]);
+    doc.circle(cx, cy, r, 'F');
+  }
+
   function generateBreakReportPdf(data) {
     var jsPDFLib = window.jspdf && window.jspdf.jsPDF;
     if (!jsPDFLib) { $('rp-err').textContent = 'Gagal memuat modul PDF. Cek koneksi internet lalu coba lagi.'; return; }
 
+    var COL_OK = [42, 138, 88];      // hijau
+    var COL_NONE = [242, 170, 30];   // kuning/oranye — titik besar
+    var COL_LATE = [190, 40, 45];    // merah
+    var COL_OPEN = [176, 123, 30];   // amber (sedang berjalan)
+    var COL_INK = [28, 25, 22];
+    var COL_ACCENT = [168, 19, 37];  // merah maroon Bakerzin
+
     var doc = new jsPDFLib({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+    var pageW = doc.internal.pageSize.getWidth();
     var outletLabel = data.outletFilter === 'ALL' ? 'Semua Outlet' : data.outletFilter;
 
+    // ── Header ──
+    doc.setFillColor(COL_ACCENT[0], COL_ACCENT[1], COL_ACCENT[2]);
+    doc.rect(0, 0, pageW, 6, 'F');
+
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(14);
-    doc.text('LAPORAN BREAK STAFF — BAKERZIN CAFE', 40, 40);
+    doc.setFontSize(15);
+    doc.setTextColor(COL_INK[0], COL_INK[1], COL_INK[2]);
+    doc.text('LAPORAN BREAK STAFF', 40, 34);
+
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
-    doc.text('Outlet: ' + outletLabel, 40, 58);
-    doc.text('Periode: ' + fmtDateID(data.dateFrom) + '  s/d  ' + fmtDateID(data.dateTo), 40, 72);
-    doc.text('Dicetak: ' + new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' }), 40, 86);
+    doc.setFontSize(9.5);
+    doc.setTextColor(120, 114, 104);
+    doc.text('BAKERZIN CAFE', 40, 48);
 
+    doc.setFontSize(9.5);
+    doc.setTextColor(COL_INK[0], COL_INK[1], COL_INK[2]);
+    doc.text('Outlet', 40, 68); doc.setFont('helvetica', 'bold'); doc.text(outletLabel, 78, 68); doc.setFont('helvetica', 'normal');
+    doc.text('Periode', 40, 81); doc.setFont('helvetica', 'bold');
+    doc.text(fmtDateID(data.dateFrom) + '  —  ' + fmtDateID(data.dateTo), 78, 81);
+    doc.setFont('helvetica', 'normal');
     doc.setFontSize(8);
-    doc.text('Keterangan:  ✓ Tepat waktu    ● Tidak ada absensi break    Telat Xm = terlambat masuk X menit', 40, 100);
+    doc.setTextColor(140, 134, 124);
+    doc.text('Dicetak ' + new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' }), pageW - 40, 34, { align: 'right' });
 
+    // ── Legenda (ikon digambar, bukan teks unicode) ──
+    var ly = 100;
+    _pdfDrawCheck(doc, 46, ly - 3, 4.6, COL_OK);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(COL_INK[0], COL_INK[1], COL_INK[2]);
+    doc.text('Tepat waktu', 58, ly);
+
+    _pdfDrawDot(doc, 160, ly - 3, 4.2, COL_NONE);
+    doc.text('Tidak ada absensi break', 172, ly);
+
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(COL_LATE[0], COL_LATE[1], COL_LATE[2]);
+    doc.text('+15m', 330, ly);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(COL_INK[0], COL_INK[1], COL_INK[2]);
+    doc.text('Telat masuk (menit)', 362, ly);
+
+    // ── Tabel ──
     var head = [['Nama', 'Posisi'].concat(data.dates.map(fmtDateShort))];
-    var kindGrid = data.staff.map(function (s) { return s.days.map(function (d) { return d; }); });
+    var kindGrid = data.staff.map(function (s) { return s.days; });
     var body = data.staff.map(function (s) {
       return [s.name, s.position || '-'].concat(s.days.map(function (day) {
-        if (day.kind === 'OK') return 'OK';
-        if (day.kind === 'LATE') return 'Telat ' + day.lateMin + 'm';
+        if (day.kind === 'LATE') return '+' + day.lateMin + 'm';
         if (day.kind === 'OPEN') return 'Berjalan';
-        return '-';
+        return ''; // OK & NONE digambar sebagai ikon lewat didDrawCell
       }));
     });
 
     doc.autoTable({
       head: head,
       body: body,
-      startY: 112,
+      startY: 114,
       theme: 'grid',
-      styles: { font: 'helvetica', fontSize: 7.5, halign: 'center', valign: 'middle', cellPadding: 3.5,
-                lineColor: [232, 228, 220], lineWidth: 0.5, textColor: [28, 25, 22] },
-      headStyles: { fillColor: [28, 25, 22], textColor: 255, fontStyle: 'bold', halign: 'center', fontSize: 7.5 },
-      columnStyles: { 0: { halign: 'left', cellWidth: 95, fontStyle: 'bold' }, 1: { halign: 'left', cellWidth: 78 } },
+      styles: { font: 'helvetica', fontSize: 7.5, halign: 'center', valign: 'middle', cellPadding: 4,
+                lineColor: [232, 228, 220], lineWidth: 0.5, textColor: COL_INK, minCellHeight: 17 },
+      headStyles: { fillColor: COL_INK, textColor: 255, fontStyle: 'bold', halign: 'center', fontSize: 7.5, cellPadding: 5 },
+      alternateRowStyles: { fillColor: [250, 249, 246] },
+      columnStyles: { 0: { halign: 'left', cellWidth: 96, fontStyle: 'bold' }, 1: { halign: 'left', cellWidth: 80 } },
       horizontalPageBreak: true,
       horizontalPageBreakRepeat: [0, 1],
       didParseCell: function (hd) {
         if (hd.section !== 'body' || hd.column.index < 2) return;
-        var kind = kindGrid[hd.row.index] && kindGrid[hd.row.index][hd.column.index - 2];
-        if (!kind) return;
-        if (kind.kind === 'OK') {
-          hd.cell.styles.textColor = [44, 122, 75];
-          hd.cell.styles.fontStyle = 'bold';
-          hd.cell.text = ['\u2713'];
-        } else if (kind.kind === 'LATE') {
-          hd.cell.styles.textColor = [179, 38, 30];
-          hd.cell.styles.fontStyle = 'bold';
-        } else if (kind.kind === 'OPEN') {
-          hd.cell.styles.textColor = [176, 123, 30];
-          hd.cell.styles.fontStyle = 'bold';
-        } else {
-          hd.cell.styles.textColor = [176, 123, 30];
-          hd.cell.text = ['\u25CF'];
-        }
+        var day = kindGrid[hd.row.index] && kindGrid[hd.row.index][hd.column.index - 2];
+        if (!day) return;
+        if (day.kind === 'LATE') { hd.cell.styles.textColor = COL_LATE; hd.cell.styles.fontStyle = 'bold'; }
+        else if (day.kind === 'OPEN') { hd.cell.styles.textColor = COL_OPEN; hd.cell.styles.fontStyle = 'bold'; }
+      },
+      didDrawCell: function (hd) {
+        if (hd.section !== 'body' || hd.column.index < 2) return;
+        var day = kindGrid[hd.row.index] && kindGrid[hd.row.index][hd.column.index - 2];
+        if (!day) return;
+        var cx = hd.cell.x + hd.cell.width / 2;
+        var cy = hd.cell.y + hd.cell.height / 2;
+        if (day.kind === 'OK') _pdfDrawCheck(doc, cx, cy, Math.min(4.6, hd.cell.height * 0.34), COL_OK);
+        else if (day.kind === 'NONE') _pdfDrawDot(doc, cx, cy, Math.min(4.2, hd.cell.height * 0.3), COL_NONE);
       }
     });
 
