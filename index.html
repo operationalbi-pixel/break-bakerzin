@@ -159,6 +159,7 @@
   #modal .body, #modal-report .body { padding: 16px 22px 22px; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
   .spin { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.4);
           border-top-color: #fff; border-radius: 50%; animation: sp 0.7s linear infinite; vertical-align: -2px; }
+  .spin.dark { width: 24px; height: 24px; border-color: var(--hair); border-top-color: var(--accent); }
   @keyframes sp { to { transform: rotate(360deg); } }
   @media (max-width: 480px) {
     .screen.top { padding-top: 16px; }
@@ -216,6 +217,14 @@
         <span>Download Laporan Break Staff</span>
         <small>PDF · pilih outlet dan periode</small>
       </button>
+    </div>
+
+    <!-- Ditampilkan saat login ulang sambil memulihkan break aktif dari Break_log -->
+    <div id="box-sync-state" class="card center hidden">
+      <div class="spin dark"></div>
+      <div style="font-weight:700; margin-top:10px;" id="sync-state-title">Memeriksa break aktif…</div>
+      <div class="muted" style="margin-top:5px;">Timer sebelumnya akan dilanjutkan otomatis.</div>
+      <button class="mini-btn hidden" id="btn-sync-retry" style="margin-top:12px;">Coba lagi</button>
     </div>
 
     <!-- mulai break -->
@@ -487,12 +496,15 @@
 
   // ── LOGIN ─────────────────────────────────────────────
   function syncStateInBackground() {
-    api({ fn: 'state' }, { retries: 0, timeoutMs: 12000 }).then(function (res) {
-      if (!res.ok) return;
+    $('sync-state-title').textContent = 'Memeriksa break aktif…';
+    show('btn-sync-retry', false);
+    api({ fn: 'state' }, { retries: 1, timeoutMs: 20000 }).then(function (res) {
+      if (!res.ok) throw new Error(res.error || 'Gagal membaca status break.');
       applyState(res);
       renderHome();
     }).catch(function () {
-      // Tidak membuat user stuck. State akan tersinkron saat scan/refresh berikutnya.
+      $('sync-state-title').textContent = 'Status break belum berhasil dimuat';
+      show('btn-sync-retry', true);
     });
   }
 
@@ -507,11 +519,13 @@
       APP.emp = res.emp;
       APP.session = res.session || null;
       applyState(res);
+      // Login hanya mengembalikan state cepat; Break_log tetap wajib disinkronkan.
       APP._syncDone = true;
       localStorage.setItem('ab_nik', res.emp.nik);
       try { localStorage.setItem('ab_emp', JSON.stringify(res.emp)); } catch (e) {}
       $('login-err').textContent = '';
       renderHome();
+      syncStateInBackground();
     }).catch(function (e) {
       busy(btn, false);
       // Kalau user pernah login di HP ini, tetap masuk dari session lokal walaupun request login lambat.
@@ -559,7 +573,11 @@
     $('p-sub').textContent = [e.position, e.outlet].filter(Boolean).join(' · ');
     $('p-ava').outerHTML = avaHtml(e.foto, e.name, 52).replace('class="ava"', 'class="ava" id="p-ava"');
 
-    if (s.activeBreak) {
+    show('box-sync-state', !!s.pendingSync);
+    if (s.pendingSync) {
+      show('box-start', false); show('box-active', false); show('box-blocked', false);
+      stopCountdown();
+    } else if (s.activeBreak) {
       show('box-start', false); show('box-blocked', false); show('box-active', true);
       startCountdown();
     } else if (s.usedToday >= s.maxPerDay) {
@@ -1360,6 +1378,10 @@
   $('btn-scan-cancel').addEventListener('click', closeScanner);
   $('btn-result-ok').addEventListener('click', renderHome);
   $('btn-mon-refresh').addEventListener('click', loadMonitor);
+  $('btn-sync-retry').addEventListener('click', function () {
+    show('btn-sync-retry', false);
+    syncStateInBackground();
+  });
 
   var histShown = false;
   $('btn-hist').addEventListener('click', function () {
