@@ -232,8 +232,8 @@
       <div class="card">
         <div class="label">Break berikutnya</div>
         <div style="height: 12px;"></div>
-        <div class="row"><span>Jatah</span><span class="v" id="st-quota"></span></div>
-        <div class="row"><span>Batas durasi</span><span class="v" id="st-limit"></span></div>
+        <div class="row"><span>Kuota hari ini</span><span class="v" id="st-quota"></span></div>
+        <div class="row"><span>Maksimal sesi ini</span><span class="v" id="st-limit"></span></div>
         <div class="row"><span>Keluar sekarang</span><span class="v" id="st-now"></span></div>
         <div class="row"><span>Harus kembali</span><span class="v" id="st-backat" style="color: var(--accent);"></span></div>
       </div>
@@ -258,8 +258,8 @@
 
     <!-- jatah habis -->
     <div id="box-blocked" class="card center hidden">
-      <div style="font-family: var(--serif); font-weight: 700; font-size: 19px;">Jatah break hari ini sudah terpakai</div>
-      <div class="muted" style="margin-top: 8px;">1× break per shift. Hubungi supervisor untuk kebutuhan mendesak.</div>
+      <div style="font-family: var(--serif); font-weight: 700; font-size: 19px;">Kuota break hari ini sudah habis</div>
+      <div class="muted" style="margin-top: 8px;">Total kuota break adalah 60 menit dan boleh dibagi menjadi beberapa sesi.</div>
     </div>
 
     <!-- hasil -->
@@ -410,6 +410,22 @@
     try { return s ? JSON.parse(s) : fb; } catch (e) { return fb; }
   }
 
+  function activeCacheKey(nik) { return 'ab_active_break_' + String(nik || '').trim().toUpperCase(); }
+  function loadActiveBreakCache(nik) {
+    var b = parseJsonSafe(localStorage.getItem(activeCacheKey(nik)), null);
+    if (!b || !Number(b.tsOut) || Number(b.tsIn || 0)) return null;
+    // Cache hanya untuk pemulihan cepat; Break_log tetap menjadi sumber data final.
+    if (Date.now() - Number(b.tsOut) > 24 * 60 * 60 * 1000) return null;
+    return b;
+  }
+  function saveActiveBreakCache(nik, b) {
+    if (!nik || !b || !Number(b.tsOut)) return;
+    try { localStorage.setItem(activeCacheKey(nik), JSON.stringify(b)); } catch (e) {}
+  }
+  function clearActiveBreakCache(nik) {
+    try { localStorage.removeItem(activeCacheKey(nik)); } catch (e) {}
+  }
+
   function sleep(ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); }
   function debounce(fn, ms) { var t; return function () { var a = arguments, c = this; clearTimeout(t); t = setTimeout(function () { fn.apply(c, a); }, ms); }; }
 
@@ -475,8 +491,21 @@
   }
   function applyState(res) {
     if (res.state) {
+      var stateNik = String((res.emp && res.emp.nik) || (APP.emp && APP.emp.nik) || '');
+      // State login cepat belum membaca sheet. Pakai cache timer agar countdown langsung lanjut.
+      if (res.state.pendingSync && !res.state.activeBreak) {
+        var cachedActive = loadActiveBreakCache(stateNik);
+        if (cachedActive) {
+          res.state.activeBreak = cachedActive;
+          res.state.cacheReady = true;
+        }
+      }
       APP.state = res.state;
       try { localStorage.setItem('ab_state', JSON.stringify(APP.state)); } catch (e) {}
+      if (!res.state.pendingSync) {
+        if (res.state.activeBreak) saveActiveBreakCache(stateNik, res.state.activeBreak);
+        else clearActiveBreakCache(stateNik);
+      }
     }
     if (res.emp) {
       // Kalau session server durable sudah lewat cache cepat, foto bisa kosong.
@@ -548,7 +577,8 @@
     APP.session = savedSession;
     APP.emp = savedEmp;
     APP.state = savedState;
-    if (APP.state.serverNow) APP.offset = APP.state.serverNow - Date.now();
+    // Jangan memakai serverNow lama dari cache; itu membuat timer kembali ke waktu sebelumnya.
+    APP.offset = 0;
 
     renderHome();
 
@@ -573,21 +603,22 @@
     $('p-sub').textContent = [e.position, e.outlet].filter(Boolean).join(' · ');
     $('p-ava').outerHTML = avaHtml(e.foto, e.name, 52).replace('class="ava"', 'class="ava" id="p-ava"');
 
-    show('box-sync-state', !!s.pendingSync);
-    if (s.pendingSync) {
-      show('box-start', false); show('box-active', false); show('box-blocked', false);
-      stopCountdown();
-    } else if (s.activeBreak) {
+    var waitingWithoutCache = !!(s.pendingSync && !s.activeBreak && !s.cacheReady);
+    show('box-sync-state', waitingWithoutCache);
+    if (s.activeBreak) {
       show('box-start', false); show('box-blocked', false); show('box-active', true);
       startCountdown();
-    } else if (s.usedToday >= s.maxPerDay) {
+    } else if (waitingWithoutCache) {
+      show('box-start', false); show('box-active', false); show('box-blocked', false);
+      stopCountdown();
+    } else if (Number(s.remainingMin || 0) <= 0) {
       show('box-start', false); show('box-active', false); show('box-blocked', true);
       stopCountdown();
     } else {
       show('box-active', false); show('box-blocked', false); show('box-start', true);
       stopCountdown();
-      $('st-quota').textContent = (s.maxPerDay - s.usedToday) + '× tersisa';
-      $('st-limit').textContent = s.limitMin + ' menit';
+      $('st-quota').textContent = Number(s.remainingMin || s.limitMin || 0).toFixed(1).replace('.0', '') + ' menit tersisa';
+      $('st-limit').textContent = Number(s.remainingMin || s.limitMin || 0).toFixed(1).replace('.0', '') + ' menit';
       $('st-now').textContent = fmtClock(nowSrv());
       $('st-backat').textContent = fmtClock(nowSrv() + s.limitMin * 60000);
     }
@@ -657,6 +688,10 @@
 
   function saveStateLocal() {
     try { localStorage.setItem('ab_state', JSON.stringify(APP.state)); } catch (e) {}
+    if (APP.emp && APP.emp.nik) {
+      if (APP.state && APP.state.activeBreak) saveActiveBreakCache(APP.emp.nik, APP.state.activeBreak);
+      else clearActiveBreakCache(APP.emp.nik);
+    }
   }
 
   function cloneObj(o) {
@@ -665,7 +700,7 @@
 
   function buildOptimisticActive(ts) {
     var emp = APP.emp || {};
-    var limit = (APP.state && APP.state.limitMin) || 60;
+    var limit = Number((APP.state && (APP.state.remainingMin || APP.state.limitMin)) || 60);
     return {
       id: 'LOCAL-' + ts + '-' + (emp.nik || ''),
       nik: emp.nik || '',
@@ -698,7 +733,11 @@
       var lateMin = Math.max(0, Math.ceil((ts - Number(b.tsOut || ts) - limit * 60000) / 60000));
       var status = lateMin > 0 ? 'TERLAMBAT' : 'TEPAT WAKTU';
       APP.state.activeBreak = null;
-      APP.state.usedToday = APP.state.maxPerDay || 1;
+      APP.state.sessionsToday = Number(APP.state.sessionsToday || APP.state.usedToday || 0) + 1;
+      APP.state.usedToday = APP.state.sessionsToday;
+      APP.state.usedMin = Math.round((Number(APP.state.usedMin || 0) + durMin) * 10) / 10;
+      APP.state.remainingMin = Math.max(0, Math.round((Number(APP.state.totalQuotaMin || 60) - APP.state.usedMin) * 10) / 10);
+      APP.state.limitMin = APP.state.remainingMin;
       APP.state.serverNow = ts;
       saveStateLocal();
       showResult({
