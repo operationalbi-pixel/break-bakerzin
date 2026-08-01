@@ -997,7 +997,12 @@
       showOptimisticScan(wasInBreak);
     }, 60);
 
-    api({ fn: 'scan', nik: APP.emp.nik, qr: text }, { retries: 1, timeoutMs: 18000 }).then(function (res) {
+    api({
+      fn: 'scan',
+      nik: APP.emp.nik,
+      qr: text,
+      action: wasInBreak ? 'IN' : 'OUT'
+    }, { retries: 0, timeoutMs: 18000 }).then(function (res) {
       applyState(res);
       if (!res.ok) {
         alert(res.error || 'Gagal mencatat scan.');
