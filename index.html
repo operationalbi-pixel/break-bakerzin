@@ -150,6 +150,23 @@
   #scan-msg { color: #fff; font-size: 13px; min-height: 18px; font-weight: 700; }
   #scan-flash { position: absolute; inset: 0; background: #fff; opacity: 0; z-index: 3; pointer-events: none; transition: opacity 0.3s; }
 
+  /* Status transaksi scan: menggantikan alert browser dan tidak mengubah timer sebelum server mengonfirmasi. */
+  #action-layer { position: fixed; inset: 0; z-index: 90; background: rgba(20,22,26,.42); backdrop-filter: blur(5px);
+                  display: flex; align-items: center; justify-content: center; padding: 22px; }
+  .action-card { width: 100%; max-width: 360px; background: #fff; border-radius: 22px; padding: 25px 22px 20px;
+                 box-shadow: 0 24px 70px rgba(20,22,26,.22); text-align: center; }
+  .action-icon { width: 52px; height: 52px; margin: 0 auto 14px; border-radius: 16px; display: flex;
+                 align-items: center; justify-content: center; background: rgba(178,13,46,.08); color: var(--accent); }
+  .action-icon .spin { width: 25px; height: 25px; border-color: rgba(178,13,46,.18); border-top-color: var(--accent); }
+  .action-icon.success { background: rgba(22,128,90,.10); color: var(--ok); font-size: 26px; font-weight: 900; }
+  .action-icon.error { background: rgba(217,119,6,.10); color: var(--warn); font-size: 25px; font-weight: 900; }
+  #action-title { font-weight: 800; font-size: 17px; }
+  #action-sub { color: var(--muted); font-size: 12.5px; line-height: 1.55; margin-top: 6px; }
+  .live-badge { display: inline-flex; align-items: center; gap: 7px; padding: 6px 10px; border-radius: 999px;
+                background: rgba(22,128,90,.09); color: var(--ok); font-size: 10px; font-weight: 800; letter-spacing: .08em; }
+  .live-badge::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor;
+                        box-shadow: 0 0 0 4px rgba(22,128,90,.10); }
+
   /* modal riwayat staff / laporan */
   #modal, #modal-report { position: fixed; inset: 0; background: rgba(28,25,22,0.5); z-index: 70;
            display: flex; align-items: center; justify-content: center; padding: 20px; }
@@ -243,6 +260,7 @@
     <!-- countdown -->
     <div id="box-active" class="stack hidden">
       <div class="card center">
+        <div class="live-badge" id="break-live-badge">BREAK AKTIF · TERSIMPAN</div>
         <div id="ring" class="ring">
           <div class="inner">
             <div class="label" id="cd-label">Sisa waktu</div>
@@ -326,6 +344,16 @@
   </div>
 </div>
 
+<!-- Status penyimpanan scan; timer di belakang tetap berjalan sampai server mengonfirmasi -->
+<div id="action-layer" class="hidden">
+  <div class="action-card">
+    <div class="action-icon" id="action-icon"><span class="spin"></span></div>
+    <div id="action-title">Menyimpan scan…</div>
+    <div id="action-sub">Mohon tunggu. Status break tidak akan berubah sebelum tersimpan.</div>
+    <button id="btn-action-close" class="btn hidden" style="margin-top:16px;">Kembali</button>
+  </div>
+</div>
+
 <!-- MODAL riwayat staff -->
 <div id="modal" class="hidden">
   <div class="box">
@@ -380,7 +408,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script>
   // ════════════════════════════════════════════════════════════
-  // GITHUB PAGES v11 — Google Sheets backend, fast QR, durable session
+  // GITHUB PAGES v13 — server-confirmed scan, durable timer, Google Sheets backend
   // Upload file ini sebagai index.html di root repository GitHub Pages.
   // Backend tetap Google Apps Script Web App URL (diakhiri /exec).
   // Session tahan 30 hari di browser, jadi tidak perlu login ulang setiap hari.
@@ -389,7 +417,7 @@
 
   var APP = { emp: null, state: null, session: null, offset: 0, timer: null, monTimer: null, monTick: null,
               lastMon: null, hq: { outlet: 'ALL', days: 1, tab: 'live', data: null, timer: null, tick: null, lastLoadAt: 0 },
-              _syncDone: false };
+              _syncDone: false, scanPending: false, syncSeq: 0 };
 
   function $(id) { return document.getElementById(id); }
   function show(id, on) { $(id).classList.toggle('hidden', !on); }
@@ -442,7 +470,11 @@
     APP.emp = null;
     APP.state = null;
     APP.session = null;
+    APP.scanPending = false;
+    APP.syncSeq++;
     stopCountdown(); stopMonitorPoll(); stopHqPoll();
+    closeScanner();
+    hideActionLayer();
     show('scr-home', false);
     show('scr-login', true);
     $('login-err').textContent = 'Sesi habis. Silakan login ulang.';
@@ -489,6 +521,31 @@
     if (on) { btn.dataset.label = btn.textContent; btn.innerHTML = '<span class="spin"></span> ' + (label || 'Memproses…'); }
     else if (btn.dataset.label) { btn.textContent = btn.dataset.label; }
   }
+  function showActionProgress(title, sub) {
+    $('action-icon').className = 'action-icon';
+    $('action-icon').innerHTML = '<span class="spin"></span>';
+    $('action-title').textContent = title || 'Menyimpan scan…';
+    $('action-sub').textContent = sub || 'Status break tidak akan berubah sebelum tersimpan.';
+    show('btn-action-close', false);
+    show('action-layer', true);
+  }
+  function showActionError(title, sub) {
+    $('action-icon').className = 'action-icon error';
+    $('action-icon').textContent = '!';
+    $('action-title').textContent = title || 'Belum berhasil dikonfirmasi';
+    $('action-sub').textContent = sub || 'Timer tetap dipertahankan. Silakan coba scan kembali.';
+    show('btn-action-close', true);
+    show('action-layer', true);
+  }
+  function showActionSuccess(title, sub) {
+    $('action-icon').className = 'action-icon success';
+    $('action-icon').textContent = '✓';
+    $('action-title').textContent = title || 'Sudah tersimpan';
+    $('action-sub').textContent = sub || 'Status sudah dikonfirmasi oleh Break_log.';
+    show('btn-action-close', true);
+    show('action-layer', true);
+  }
+  function hideActionLayer() { show('action-layer', false); }
   function applyState(res) {
     if (res.state) {
       var stateNik = String((res.emp && res.emp.nik) || (APP.emp && APP.emp.nik) || '');
@@ -525,13 +582,16 @@
 
   // ── LOGIN ─────────────────────────────────────────────
   function syncStateInBackground() {
+    var seq = ++APP.syncSeq;
     $('sync-state-title').textContent = 'Memeriksa break aktif…';
     show('btn-sync-retry', false);
     api({ fn: 'state' }, { retries: 1, timeoutMs: 20000 }).then(function (res) {
+      if (APP.scanPending || seq !== APP.syncSeq) return;
       if (!res.ok) throw new Error(res.error || 'Gagal membaca status break.');
       applyState(res);
       renderHome();
     }).catch(function () {
+      if (APP.scanPending || seq !== APP.syncSeq) return;
       $('sync-state-title').textContent = 'Status break belum berhasil dimuat';
       show('btn-sync-retry', true);
     });
@@ -607,6 +667,7 @@
     show('box-sync-state', waitingWithoutCache);
     if (s.activeBreak) {
       show('box-start', false); show('box-blocked', false); show('box-active', true);
+      $('break-live-badge').textContent = APP.scanPending ? 'BREAK AKTIF · MENYIMPAN' : 'BREAK AKTIF · TERSIMPAN';
       startCountdown();
     } else if (waitingWithoutCache) {
       show('box-start', false); show('box-active', false); show('box-blocked', false);
@@ -692,69 +753,6 @@
       if (APP.state && APP.state.activeBreak) saveActiveBreakCache(APP.emp.nik, APP.state.activeBreak);
       else clearActiveBreakCache(APP.emp.nik);
     }
-  }
-
-  function cloneObj(o) {
-    try { return JSON.parse(JSON.stringify(o || null)); } catch (e) { return o || null; }
-  }
-
-  function buildOptimisticActive(ts) {
-    var emp = APP.emp || {};
-    var limit = Number((APP.state && (APP.state.remainingMin || APP.state.limitMin)) || 60);
-    return {
-      id: 'LOCAL-' + ts + '-' + (emp.nik || ''),
-      nik: emp.nik || '',
-      name: emp.name || '',
-      outlet: emp.outlet || '',
-      timeOut: new Date(ts).toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', second: '2-digit' }).replace(/\./g, ':'),
-      timeIn: '',
-      tsOut: ts,
-      tsIn: 0,
-      limitMin: limit,
-      durMin: null,
-      lateMin: null,
-      mustBackTs: ts + limit * 60000,
-      mustBackAt: fmtClock(ts + limit * 60000),
-      status: 'SEDANG BREAK',
-      position: emp.position || '',
-      grade: emp.grade || '',
-      foto: emp.foto || ''
-    };
-  }
-
-  function showOptimisticScan(wasInBreak) {
-    var ts = nowSrv();
-    if (!APP.state) APP.state = {};
-
-    if (wasInBreak && APP.state.activeBreak) {
-      var b = APP.state.activeBreak;
-      var limit = Number(b.limitMin || APP.state.limitMin || 60);
-      var durMin = Math.max(0, Math.round((ts - Number(b.tsOut || ts)) / 60000 * 10) / 10);
-      var lateMin = Math.max(0, Math.ceil((ts - Number(b.tsOut || ts) - limit * 60000) / 60000));
-      var status = lateMin > 0 ? 'TERLAMBAT' : 'TEPAT WAKTU';
-      APP.state.activeBreak = null;
-      APP.state.sessionsToday = Number(APP.state.sessionsToday || APP.state.usedToday || 0) + 1;
-      APP.state.usedToday = APP.state.sessionsToday;
-      APP.state.usedMin = Math.round((Number(APP.state.usedMin || 0) + durMin) * 10) / 10;
-      APP.state.remainingMin = Math.max(0, Math.round((Number(APP.state.totalQuotaMin || 60) - APP.state.usedMin) * 10) / 10);
-      APP.state.limitMin = APP.state.remainingMin;
-      APP.state.serverNow = ts;
-      saveStateLocal();
-      showResult({
-        timeOut: b.timeOut || fmtClock(Number(b.tsOut || ts)),
-        timeIn: new Date(ts).toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', second: '2-digit' }).replace(/\./g, ':'),
-        durMin: durMin,
-        lateMin: lateMin,
-        status: status,
-        limitMin: limit
-      });
-      return;
-    }
-
-    APP.state.activeBreak = buildOptimisticActive(ts);
-    APP.state.serverNow = ts;
-    saveStateLocal();
-    renderHome();
   }
 
   function normalizeCamLabel(label) {
@@ -983,41 +981,79 @@
     }
 
     scanBusy = true;
-    var prevState = cloneObj(APP.state);
+    APP.scanPending = true;
+    APP.syncSeq++; // batalkan respons sync lama agar tidak menimpa hasil scan
     var wasInBreak = !!(APP.state && APP.state.activeBreak);
+    var action = wasInBreak ? 'IN' : 'OUT';
+    var requestId = 'S' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
 
     if (navigator.vibrate) navigator.vibrate(80);
     $('scan-flash').style.opacity = '0.85';
     setTimeout(function () { $('scan-flash').style.opacity = '0'; }, 90);
-    $('scan-msg').textContent = wasInBreak ? 'QR terbaca — menyelesaikan break…' : 'QR terbaca — mulai countdown…';
+    closeScanner();
 
-    // UI langsung berubah tanpa menunggu pembacaan sheet ulang, supaya terasa responsif.
-    setTimeout(function () {
-      closeScanner();
-      showOptimisticScan(wasInBreak);
-    }, 60);
+    // Tidak ada perubahan state optimistis. Timer tetap hidup sampai server mengonfirmasi IN.
+    if (action === 'IN') {
+      showActionProgress('Menyimpan scan masuk…', 'Timer tetap berjalan sampai Break_log mengonfirmasi Anda sudah masuk.');
+      if ($('break-live-badge')) $('break-live-badge').textContent = 'BREAK AKTIF · MENYIMPAN';
+    } else {
+      showActionProgress('Mencatat break…', 'Countdown akan dimulai setelah Break_log mengonfirmasi scan keluar.');
+    }
 
     api({
-      fn: 'scan',
-      nik: APP.emp.nik,
-      qr: text,
-      action: wasInBreak ? 'IN' : 'OUT'
-    }, { retries: 0, timeoutMs: 18000 }).then(function (res) {
+      fn: 'scan', nik: APP.emp.nik, qr: text, action: action, requestId: requestId
+    }, { retries: 1, timeoutMs: 45000 }).then(function (res) {
+      APP.scanPending = false;
+      hideActionLayer();
       applyState(res);
       if (!res.ok) {
-        alert(res.error || 'Gagal mencatat scan.');
         renderHome();
+        showActionError('Scan belum dapat diproses', res.error || 'Status break tidak berubah. Silakan coba kembali.');
         return;
       }
-      // Sinkronkan hasil final dari server setelah penulisan sheet selesai.
       if (res.action === 'IN' && res.result) showResult(res.result);
       else renderHome();
-    }).catch(function (e) {
-      // Jika penulisan gagal, langsung kembalikan state sebelumnya tanpa baca tambahan.
-      APP.state = prevState;
-      saveStateLocal();
+    }).catch(function () {
+      // Request mungkin tetap selesai di server walaupun browser timeout. Jangan mengubah timer.
+      showActionProgress('Memastikan status…', 'Koneksi lambat. Kami sedang mencocokkan status dengan Break_log; timer tetap berjalan.');
+      reconcileScan(action, wasInBreak, 0);
+    });
+  }
+
+  function reconcileScan(action, wasInBreak, attempt) {
+    sleep(attempt ? 1800 : 900).then(function () {
+      return api({ fn: 'state', nik: APP.emp.nik }, { retries: 0, timeoutMs: 30000 });
+    }).then(function (res) {
+      if (!res.ok) throw new Error(res.error || 'Status belum tersedia.');
+      var isActive = !!(res.state && res.state.activeBreak);
+      var confirmed = action === 'OUT' ? isActive : !isActive;
+      if (!confirmed && attempt < 2) return reconcileScan(action, wasInBreak, attempt + 1);
+
+      APP.scanPending = false;
+      hideActionLayer();
+      if (confirmed) {
+        applyState(res);
+        renderHome();
+        if (action === 'IN') {
+          showActionSuccess('Break sudah tersimpan', 'Scan masuk berhasil dikonfirmasi. Riwayat sudah diperbarui.');
+        }
+        return;
+      }
+
+      // Belum terkonfirmasi: pertahankan state lokal, khususnya timer aktif.
       renderHome();
-      alert('QR terbaca, tapi koneksi gagal: ' + e.message + '. Silakan scan ulang.');
+      showActionError(
+        'Status belum terkonfirmasi',
+        wasInBreak ? 'Timer tetap berjalan. Pastikan koneksi stabil lalu scan masuk kembali.' : 'Break belum dimulai. Pastikan koneksi stabil lalu scan kembali.'
+      );
+    }).catch(function () {
+      if (attempt < 2) return reconcileScan(action, wasInBreak, attempt + 1);
+      APP.scanPending = false;
+      renderHome();
+      showActionError(
+        'Koneksi belum stabil',
+        wasInBreak ? 'Timer tetap berjalan dan tidak dihapus. Silakan tutup pesan ini lalu scan masuk kembali.' : 'Status belum berubah. Silakan tutup pesan ini lalu scan kembali.'
+      );
     });
   }
 
@@ -1412,14 +1448,19 @@
     clearSavedSession();
     APP.emp = null;
     APP.session = null;
+    APP.scanPending = false;
+    APP.syncSeq++;
     APP.hq = { outlet: 'ALL', days: 1, tab: 'live', data: null, timer: null, tick: null, lastLoadAt: 0 };
     APP._syncDone = false;
     stopCountdown(); stopMonitorPoll(); stopHqPoll();
+    closeScanner();
+    hideActionLayer();
     show('scr-home', false); show('scr-login', true);
   });
   $('btn-scan-out').addEventListener('click', openScanner);
   $('btn-scan-in').addEventListener('click', openScanner);
   $('btn-scan-cancel').addEventListener('click', closeScanner);
+  $('btn-action-close').addEventListener('click', hideActionLayer);
   $('btn-result-ok').addEventListener('click', renderHome);
   $('btn-mon-refresh').addEventListener('click', loadMonitor);
   $('btn-sync-retry').addEventListener('click', function () {
