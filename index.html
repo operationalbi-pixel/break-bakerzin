@@ -4,21 +4,22 @@
 <meta charset="UTF-8"></meta>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"></meta>
 <title>Absensi Break — Bakerzin Cafe</title>
-<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&amp;family=Archivo:wght@500;600;700;800&amp;family=JetBrains+Mono:wght@500;700&amp;display=swap" rel="stylesheet"></link>
 <style>
   :root {
-    --bg: #F6F5F2; --card: #FFFFFF; --ink: #1C1916; --muted: #8A8378;
-    --hair: #E8E4DC; --accent: #A81325;
-    --ok: #2C7A4B; --warn: #B07B1E; --late: #B3261E;
-    --serif: 'Source Serif 4', serif; --sans: 'Archivo', sans-serif; --mono: 'JetBrains Mono', monospace;
+    --bg: #F7F8FA; --card: #FFFFFF; --ink: #202124; --muted: #70757D;
+    --hair: #E7E9ED; --accent: #B20D2E; --accent-dark: #8D0A25;
+    --ok: #16805A; --warn: #B7791F; --late: #C62828;
+    --serif: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: var(--bg); }
   body { font-family: var(--sans); color: var(--ink); -webkit-font-smoothing: antialiased; }
 
   /* ── layout terpusat ── */
-  .screen { min-height: 100dvh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px 20px; gap: 22px; }
-  .screen.top { justify-content: flex-start; padding-top: 36px; }
+  .screen { min-height: 100dvh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px 18px; gap: 22px; }
+  .screen.top { justify-content: flex-start; padding-top: 28px; padding-bottom: 48px; }
   .col { width: 100%; max-width: 430px; display: flex; flex-direction: column; gap: 14px; }
   .col.wide { max-width: 560px; }
 
@@ -26,21 +27,22 @@
   .wordmark .b { font-family: var(--serif); font-weight: 700; font-size: 30px; letter-spacing: 0.01em; }
   .wordmark .s { font-size: 11px; font-weight: 700; letter-spacing: 0.22em; text-transform: uppercase; color: var(--muted); margin-top: 2px; }
 
-  .card { background: var(--card); border: 1px solid var(--hair); border-radius: 16px; padding: 24px;
-          box-shadow: 0 1px 2px rgba(28,25,22,0.03), 0 10px 28px rgba(28,25,22,0.04); }
+  .card { background: rgba(255,255,255,.98); border: 1px solid var(--hair); border-radius: 18px; padding: 24px;
+          box-shadow: 0 1px 2px rgba(24,28,35,.03), 0 10px 30px rgba(24,28,35,.055); }
   .card.tight { padding: 16px 18px; }
   .label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.14em; color: var(--muted); }
 
-  .btn { width: 100%; padding: 14px; border: none; border-radius: 10px; background: var(--ink); color: #fff;
-         font-family: var(--sans); font-weight: 700; font-size: 14.5px; letter-spacing: 0.02em; cursor: pointer; }
-  .btn.accent { background: var(--accent); }
+  .btn { width: 100%; min-height: 48px; padding: 14px 16px; border: none; border-radius: 12px; background: var(--ink); color: #fff;
+         font-family: var(--sans); font-weight: 700; font-size: 14.5px; letter-spacing: 0.01em; cursor: pointer;
+         box-shadow: 0 5px 14px rgba(32,33,36,.12); transition: transform .15s ease, box-shadow .15s ease, background .15s ease; }
+  .btn.accent { background: linear-gradient(135deg, var(--accent), var(--accent-dark)); box-shadow: 0 7px 18px rgba(178,13,46,.22); }
   .btn.ghost { background: transparent; color: var(--ink); border: 1px solid var(--ink); }
   .btn:disabled { opacity: 0.45; }
   .btn:active { transform: translateY(1px); }
 
   input.nik { width: 100%; padding: 15px; font-size: 19px; font-family: var(--mono); font-weight: 700;
-              border: 1px solid var(--hair); border-radius: 12px; text-align: center; letter-spacing: 0.1em; background: #FCFBF9; }
-  input.nik:focus { outline: 2px solid var(--accent); border-color: transparent; }
+              border: 1px solid var(--hair); border-radius: 12px; text-align: center; letter-spacing: 0.1em; background: #FAFBFC; transition: .18s; }
+  input.nik:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px rgba(178,13,46,.09); background:#fff; }
   .err { color: var(--late); font-size: 13px; font-weight: 700; text-align: center; min-height: 18px; }
   .muted { color: var(--muted); font-size: 13px; line-height: 1.55; }
   .center { text-align: center; }
@@ -61,7 +63,7 @@
   .ava { width: 52px; height: 52px; border-radius: 50%; background: var(--ink); color: #fff; overflow: hidden;
          display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 16px; flex-shrink: 0; }
   .ava img { width: 100%; height: 100%; object-fit: cover; }
-  .mini-btn { padding: 5px 12px; border: 1px solid var(--hair); border-radius: 999px; background: #fff;
+  .mini-btn { min-height: 32px; padding: 5px 12px; border: 1px solid var(--hair); border-radius: 999px; background: #fff;
               font-family: var(--sans); font-weight: 700; font-size: 12px; cursor: pointer; color: var(--muted); }
   .mini-btn:hover { border-color: var(--accent); color: var(--accent); }
 
@@ -86,9 +88,9 @@
   .seg button.on { background: var(--ink); color: #fff; }
 
   /* list rows */
-  .item { background: var(--card); border: 1px solid var(--hair); border-radius: 14px; padding: 13px 16px;
-          display: flex; align-items: center; gap: 12px; cursor: pointer; transition: border-color 0.15s; }
-  .item:hover { border-color: var(--ink); }
+  .item { background: var(--card); border: 1px solid var(--hair); border-radius: 15px; padding: 14px 16px;
+          display: flex; align-items: center; gap: 12px; cursor: pointer; transition: transform .15s, border-color .15s, box-shadow .15s; }
+  .item:hover { border-color: #C9CDD4; transform: translateY(-1px); box-shadow:0 7px 18px rgba(24,28,35,.06); }
   .item.late { border-color: var(--late); }
   .item .nm { font-weight: 700; font-size: 14.5px; }
   .item .sb { color: var(--muted); font-size: 12px; margin-top: 1px; }
@@ -149,6 +151,13 @@
   .spin { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.4);
           border-top-color: #fff; border-radius: 50%; animation: sp 0.7s linear infinite; vertical-align: -2px; }
   @keyframes sp { to { transform: rotate(360deg); } }
+  @media (max-width: 480px) {
+    .screen.top { padding-top: 16px; }
+    .card { padding: 20px; }
+    .card.tight { padding: 14px 16px; }
+    .ring { width: 198px; height: 198px; }
+    .ring .inner { width: 170px; height: 170px; }
+  }
 </style>
 </head>
 <body>
@@ -345,11 +354,11 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script>
   // ════════════════════════════════════════════════════════════
-  // GITHUB PAGES ULTRA FAST QR VERSION v10 — Optimized BigQuery cost
+  // GITHUB PAGES v11 — Google Sheets backend, fast QR, durable session
   // Upload file ini sebagai index.html di root repository GitHub Pages.
   // Backend tetap Google Apps Script Web App URL (diakhiri /exec).
   // Session tahan 30 hari di browser, jadi tidak perlu login ulang setiap hari.
-  var API_URL = 'https://script.google.com/macros/s/AKfycbw_sm_cpSxPBQPKhU81YDPbAru9Ktdjw4nhgH7cqlhSIMCY4y6txih3gAWv1vpSRhYt2Q/exec';
+  var API_URL = 'https://script.google.com/macros/s/AKfycbw_KKIyLwdvGWxGtP79-Rj9bc1crEH6Or4QkPnTYknfhUCxC8cXwHNa-SZ3y_B37ybpFw/exec';
   // ════════════════════════════════════════════════════════════
 
   var APP = { emp: null, state: null, session: null, offset: 0, timer: null, monTimer: null, monTick: null,
@@ -474,7 +483,7 @@
     var btn = $('btn-login');
     if (!silent) busy(btn, true, 'Masuk…');
 
-    // Target login cepat: timeout 15 detik, BigQuery state/history disinkron di background.
+    // Target login cepat: state/history Break_log disinkron di background.
     api({ fn: 'login', nik: nik, fast: true }, { retries: 0, timeoutMs: 15000 }).then(function (res) {
       busy(btn, false);
       if (!res.ok) { $('login-err').textContent = res.error; show('scr-login', true); return; }
@@ -512,7 +521,7 @@
 
     renderHome();
 
-    // Hanya sinkron dari server sekali per sesi untuk hemat BigQuery.
+    // Hanya sinkron dari server sekali per sesi agar pembacaan sheet tetap ringan.
     if (!APP._syncDone) {
       APP._syncDone = true;
       syncStateInBackground();
@@ -550,7 +559,7 @@
 
     // panel sesuai peran
     var canDashboard = !!(s.isHq || s.canMonitor);
-    // Saat login cepat, state awal belum hasil BigQuery. Tahan load dashboard sampai sync background selesai agar login tetap ringan.
+    // Saat login cepat, state awal belum membaca Break_log. Dashboard menunggu sinkron background.
     if (s.pendingSync) canDashboard = false;
     $('home-col').classList.toggle('wide', canDashboard);
     show('box-hq', canDashboard);
@@ -906,7 +915,7 @@
     setTimeout(function () { $('scan-flash').style.opacity = '0'; }, 90);
     $('scan-msg').textContent = wasInBreak ? 'QR terbaca — menyelesaikan break…' : 'QR terbaca — mulai countdown…';
 
-    // UI langsung berubah tanpa menunggu BigQuery, supaya terasa <1 detik.
+    // UI langsung berubah tanpa menunggu pembacaan sheet ulang, supaya terasa responsif.
     setTimeout(function () {
       closeScanner();
       showOptimisticScan(wasInBreak);
@@ -919,11 +928,11 @@
         renderHome();
         return;
       }
-      // Sinkronkan hasil final dari server setelah BigQuery selesai.
+      // Sinkronkan hasil final dari server setelah penulisan sheet selesai.
       if (res.action === 'IN' && res.result) showResult(res.result);
       else renderHome();
     }).catch(function (e) {
-      // Simpan query BigQuery — langsung revert ke state sebelumnya tanpa query tambahan.
+      // Jika penulisan gagal, langsung kembalikan state sebelumnya tanpa baca tambahan.
       APP.state = prevState;
       saveStateLocal();
       renderHome();
