@@ -2,7 +2,7 @@
 <html lang="id">
 <head>
 <meta charset="UTF-8"></meta>
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"></meta>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"></meta>
 <title>Absensi Break — Bakerzin Cafe</title>
 <style>
   :root {
@@ -19,7 +19,11 @@
 
   /* ── layout terpusat ── */
   .screen { min-height: 100dvh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px 18px; gap: 22px; }
-  .screen.top { justify-content: flex-start; padding-top: 28px; padding-bottom: 48px; }
+  .screen.top {
+    justify-content: flex-start;
+    padding-top: max(28px, calc(env(safe-area-inset-top, 0px) + 16px));
+    padding-bottom: max(48px, calc(env(safe-area-inset-bottom, 0px) + 28px));
+  }
   .col { width: 100%; max-width: 430px; display: flex; flex-direction: column; gap: 14px; }
   .col.wide { max-width: 560px; }
 
@@ -167,7 +171,8 @@
   .spin.dark { width: 24px; height: 24px; border-color: var(--hair); border-top-color: var(--accent); }
   @keyframes sp { to { transform: rotate(360deg); } }
   @media (max-width: 480px) {
-    .screen.top { padding-top: 16px; }
+    /* Jaga kartu profil tetap di bawah notch / Dynamic Island / status bar. */
+    .screen.top { padding-top: max(44px, calc(env(safe-area-inset-top, 0px) + 14px)); }
     .card { padding: 20px; }
     .card.tight { padding: 14px 16px; }
     .ring { width: 198px; height: 198px; }
@@ -386,7 +391,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script>
   // ════════════════════════════════════════════════════════════
-  // GITHUB PAGES v14 — instant scan feedback, background confirmation, durable timer
+  // GITHUB PAGES v16 — notch-safe layout + silent background scan persistence
   // Upload file ini sebagai index.html di root repository GitHub Pages.
   // Backend tetap Google Apps Script Web App URL (diakhiri /exec).
   // Session tahan 30 hari di browser, jadi tidak perlu login ulang setiap hari.
