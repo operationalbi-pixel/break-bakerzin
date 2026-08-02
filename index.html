@@ -150,32 +150,6 @@
   #scan-msg { color: #fff; font-size: 13px; min-height: 18px; font-weight: 700; }
   #scan-flash { position: absolute; inset: 0; background: #fff; opacity: 0; z-index: 3; pointer-events: none; transition: opacity 0.3s; }
 
-  /* Feedback cepat: tidak menutup layar dan proses simpan tetap berjalan di belakang. */
-  #scan-toast { position: fixed; z-index: 95; top: 14px; left: 50%; width: calc(100% - 28px); max-width: 410px;
-                transform: translate(-50%, -14px); opacity: 0; pointer-events: none; transition: .22s ease;
-                background: rgba(255,255,255,.97); border: 1px solid var(--hair); border-radius: 15px;
-                box-shadow: 0 12px 36px rgba(20,22,26,.16); padding: 12px 14px; display: flex; gap: 11px; align-items: center; }
-  #scan-toast.on { opacity: 1; transform: translate(-50%, 0); }
-  .toast-mark { width: 34px; height: 34px; border-radius: 11px; flex: 0 0 auto; display: flex; align-items: center;
-                justify-content: center; background: rgba(22,128,90,.10); color: var(--ok); font-weight: 900; }
-  #scan-toast.warn .toast-mark { background: rgba(183,121,31,.10); color: var(--warn); }
-  #scan-toast.error .toast-mark { background: rgba(198,40,40,.10); color: var(--late); }
-  .toast-copy { min-width: 0; }
-  #toast-title { font-size: 13px; font-weight: 800; }
-  #toast-sub { margin-top: 1px; color: var(--muted); font-size: 11.5px; line-height: 1.4; }
-
-  /* Status transaksi scan: menggantikan alert browser dan tidak mengubah timer sebelum server mengonfirmasi. */
-  #action-layer { position: fixed; inset: 0; z-index: 90; background: rgba(20,22,26,.42); backdrop-filter: blur(5px);
-                  display: flex; align-items: center; justify-content: center; padding: 22px; }
-  .action-card { width: 100%; max-width: 360px; background: #fff; border-radius: 22px; padding: 25px 22px 20px;
-                 box-shadow: 0 24px 70px rgba(20,22,26,.22); text-align: center; }
-  .action-icon { width: 52px; height: 52px; margin: 0 auto 14px; border-radius: 16px; display: flex;
-                 align-items: center; justify-content: center; background: rgba(178,13,46,.08); color: var(--accent); }
-  .action-icon .spin { width: 25px; height: 25px; border-color: rgba(178,13,46,.18); border-top-color: var(--accent); }
-  .action-icon.success { background: rgba(22,128,90,.10); color: var(--ok); font-size: 26px; font-weight: 900; }
-  .action-icon.error { background: rgba(217,119,6,.10); color: var(--warn); font-size: 25px; font-weight: 900; }
-  #action-title { font-weight: 800; font-size: 17px; }
-  #action-sub { color: var(--muted); font-size: 12.5px; line-height: 1.55; margin-top: 6px; }
   .live-badge { display: inline-flex; align-items: center; gap: 7px; padding: 6px 10px; border-radius: 999px;
                 background: rgba(22,128,90,.09); color: var(--ok); font-size: 10px; font-weight: 800; letter-spacing: .08em; }
   .live-badge::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor;
@@ -358,24 +332,6 @@
   </div>
 </div>
 
-<!-- Status penyimpanan scan; timer di belakang tetap berjalan sampai server mengonfirmasi -->
-<div id="action-layer" class="hidden">
-  <div class="action-card">
-    <div class="action-icon" id="action-icon"><span class="spin"></span></div>
-    <div id="action-title">Menyimpan scan…</div>
-    <div id="action-sub">Mohon tunggu. Status break tidak akan berubah sebelum tersimpan.</div>
-    <button id="btn-action-close" class="btn hidden" style="margin-top:16px;">Kembali</button>
-  </div>
-</div>
-
-<div id="scan-toast" aria-live="polite">
-  <div class="toast-mark" id="toast-mark">✓</div>
-  <div class="toast-copy">
-    <div id="toast-title">QR terbaca</div>
-    <div id="toast-sub">Menyimpan di belakang…</div>
-  </div>
-</div>
-
 <!-- MODAL riwayat staff -->
 <div id="modal" class="hidden">
   <div class="box">
@@ -439,7 +395,7 @@
 
   var APP = { emp: null, state: null, session: null, offset: 0, timer: null, monTimer: null, monTick: null,
               lastMon: null, hq: { outlet: 'ALL', days: 1, tab: 'live', data: null, timer: null, tick: null, lastLoadAt: 0 },
-              _syncDone: false, scanPending: false, pendingAction: '', syncSeq: 0, toastTimer: null };
+              _syncDone: false, scanPending: false, pendingAction: '', syncSeq: 0 };
 
   function $(id) { return document.getElementById(id); }
   function show(id, on) { $(id).classList.toggle('hidden', !on); }
@@ -497,7 +453,6 @@
     APP.syncSeq++;
     stopCountdown(); stopMonitorPoll(); stopHqPoll();
     closeScanner();
-    hideActionLayer();
     show('scr-home', false);
     show('scr-login', true);
     $('login-err').textContent = 'Sesi habis. Silakan login ulang.';
@@ -544,41 +499,6 @@
     if (on) { btn.dataset.label = btn.textContent; btn.innerHTML = '<span class="spin"></span> ' + (label || 'Memproses…'); }
     else if (btn.dataset.label) { btn.textContent = btn.dataset.label; }
   }
-  function showActionProgress(title, sub) {
-    $('action-icon').className = 'action-icon';
-    $('action-icon').innerHTML = '<span class="spin"></span>';
-    $('action-title').textContent = title || 'Menyimpan scan…';
-    $('action-sub').textContent = sub || 'Status break tidak akan berubah sebelum tersimpan.';
-    show('btn-action-close', false);
-    show('action-layer', true);
-  }
-  function showActionError(title, sub) {
-    $('action-icon').className = 'action-icon error';
-    $('action-icon').textContent = '!';
-    $('action-title').textContent = title || 'Belum berhasil dikonfirmasi';
-    $('action-sub').textContent = sub || 'Timer tetap dipertahankan. Silakan coba scan kembali.';
-    show('btn-action-close', true);
-    show('action-layer', true);
-  }
-  function showActionSuccess(title, sub) {
-    $('action-icon').className = 'action-icon success';
-    $('action-icon').textContent = '✓';
-    $('action-title').textContent = title || 'Sudah tersimpan';
-    $('action-sub').textContent = sub || 'Status sudah dikonfirmasi oleh Break_log.';
-    show('btn-action-close', true);
-    show('action-layer', true);
-  }
-  function hideActionLayer() { show('action-layer', false); }
-  function showScanToast(kind, title, sub, duration) {
-    var toast = $('scan-toast');
-    toast.className = kind || 'ok';
-    $('toast-mark').textContent = kind === 'error' ? '!' : (kind === 'warn' ? '…' : '✓');
-    $('toast-title').textContent = title || 'QR terbaca';
-    $('toast-sub').textContent = sub || 'Menyimpan di belakang…';
-    clearTimeout(APP.toastTimer);
-    requestAnimationFrame(function () { toast.classList.add('on'); });
-    if (duration !== 0) APP.toastTimer = setTimeout(function () { toast.classList.remove('on'); }, duration || 2400);
-  }
   function cloneState(state) {
     try { return JSON.parse(JSON.stringify(state || {})); } catch (e) { return state || {}; }
   }
@@ -591,6 +511,76 @@
       timeIn: '', tsOut: ts, tsIn: 0, limitMin: limit, durMin: null, lateMin: null,
       mustBackTs: ts + limit * 60000, mustBackAt: fmtClock(ts + limit * 60000), status: 'MENYIMPAN'
     };
+  }
+  function localBreakResult(active) {
+    var now = nowSrv();
+    var limit = Number(active.limitMin || 60);
+    var dur = Math.max(0, Math.round(((now - Number(active.tsOut)) / 60000) * 10) / 10);
+    var late = Math.max(0, Math.ceil((now - Number(active.tsOut) - limit * 60000) / 60000));
+    return {
+      timeOut: active.timeOut || fmtClock(active.tsOut) + ':00',
+      timeIn: new Date(now).toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta', hour12: false }).replace(/\./g, ':'),
+      durMin: dur, lateMin: late, status: late > 0 ? 'TERLAMBAT' : 'TEPAT WAKTU', limitMin: limit
+    };
+  }
+  function applyLocalBreakIn(result) {
+    var s = cloneState(APP.state);
+    var used = Math.round((Number(s.usedMin || 0) + Number(result.durMin || 0)) * 10) / 10;
+    var quota = Number(s.totalQuotaMin || 60);
+    s.activeBreak = null;
+    s.usedMin = used;
+    s.remainingMin = Math.max(0, Math.round((quota - used) * 10) / 10);
+    s.limitMin = s.remainingMin;
+    s.sessionsToday = Number(s.sessionsToday || s.usedToday || 0) + 1;
+    s.usedToday = s.sessionsToday;
+    s.serverNow = nowSrv();
+    s.pendingSync = false;
+    APP.state = s;
+    saveStateLocal();
+  }
+  function pendingScanKey() { return 'ab_pending_scan_v15'; }
+  function savePendingScan(job) {
+    try { localStorage.setItem(pendingScanKey(), JSON.stringify(job)); } catch (e) {}
+  }
+  function clearPendingScan(requestId) {
+    var job = parseJsonSafe(localStorage.getItem(pendingScanKey()), null);
+    if (!requestId || !job || job.requestId === requestId) localStorage.removeItem(pendingScanKey());
+  }
+  function finishSilentScan(job, res) {
+    clearPendingScan(job.requestId);
+    APP.scanPending = false;
+    APP.pendingAction = '';
+    if (!APP.emp || String(APP.emp.nik) !== String(job.nik)) return;
+    if (res && res.state) applyState(res);
+    // OUT perlu mengganti waktu provisional dengan waktu resmi server.
+    // IN tidak merender ulang agar hasil instan yang sedang dilihat tidak terganggu.
+    if (job.action === 'OUT' && APP.emp) renderHome();
+  }
+  function sendScanSilently(job, attempt) {
+    attempt = Number(attempt || 0);
+    if (!APP.emp || !APP.session) return;
+    savePendingScan(job);
+    api({ fn: 'scan', nik: job.nik, qr: job.qr, action: job.action, requestId: job.requestId },
+        { retries: 0, timeoutMs: 60000 }).then(function (res) {
+      if (res && (res.ok || (job.action === 'IN' && res.code === 'NO_ACTIVE_BREAK'))) {
+        finishSilentScan(job, res);
+        return;
+      }
+      // Semua kegagalan server dicoba ulang diam-diam. Tidak ada pesan/loading di frontend.
+      var wait = Math.min(60000, 2000 * Math.pow(2, Math.min(attempt, 5)));
+      setTimeout(function () { sendScanSilently(job, attempt + 1); }, wait);
+    }).catch(function () {
+      if (!APP.emp || !APP.session) return;
+      var wait = Math.min(60000, 2000 * Math.pow(2, Math.min(attempt, 5)));
+      setTimeout(function () { sendScanSilently(job, attempt + 1); }, wait);
+    });
+  }
+  function resumePendingScan() {
+    var job = parseJsonSafe(localStorage.getItem(pendingScanKey()), null);
+    if (!job || !APP.emp || String(job.nik) !== String(APP.emp.nik)) return;
+    APP.scanPending = true;
+    APP.pendingAction = job.action || '';
+    sendScanSilently(job, 0);
   }
   function applyState(res) {
     if (res.state) {
@@ -660,7 +650,8 @@
       try { localStorage.setItem('ab_emp', JSON.stringify(res.emp)); } catch (e) {}
       $('login-err').textContent = '';
       renderHome();
-      syncStateInBackground();
+      resumePendingScan();
+      if (!APP.scanPending) syncStateInBackground();
     }).catch(function (e) {
       busy(btn, false);
       // Kalau user pernah login di HP ini, tetap masuk dari session lokal walaupun request login lambat.
@@ -687,9 +678,10 @@
     APP.offset = 0;
 
     renderHome();
+    resumePendingScan();
 
     // Hanya sinkron dari server sekali per sesi agar pembacaan sheet tetap ringan.
-    if (!APP._syncDone) {
+    if (!APP._syncDone && !APP.scanPending) {
       APP._syncDone = true;
       syncStateInBackground();
     }
@@ -713,11 +705,9 @@
     show('box-sync-state', waitingWithoutCache);
     if (s.activeBreak) {
       show('box-start', false); show('box-blocked', false); show('box-active', true);
-      $('break-live-badge').textContent = APP.scanPending
-        ? (APP.pendingAction === 'IN' ? 'SCAN MASUK · MENYIMPAN' : 'BREAK DIMULAI · MENYIMPAN')
-        : 'BREAK AKTIF · TERSIMPAN';
+      $('break-live-badge').textContent = 'BREAK AKTIF';
       $('btn-scan-in').disabled = APP.scanPending;
-      $('btn-scan-in').textContent = APP.scanPending && APP.pendingAction === 'IN' ? 'Scan terbaca — menyimpan…' : 'Scan QR — Saya Masuk';
+      $('btn-scan-in').textContent = 'Scan QR — Saya Masuk';
       startCountdown();
     } else if (waitingWithoutCache) {
       show('box-start', false); show('box-active', false); show('box-blocked', false);
@@ -729,7 +719,7 @@
       show('box-active', false); show('box-blocked', false); show('box-start', true);
       stopCountdown();
       $('btn-scan-out').disabled = APP.scanPending;
-      $('btn-scan-out').textContent = APP.scanPending ? 'QR terbaca — menyimpan…' : 'Scan QR — Mulai Break';
+      $('btn-scan-out').textContent = 'Scan QR — Mulai Break';
       $('st-quota').textContent = Number(s.remainingMin || s.limitMin || 0).toFixed(1).replace('.0', '') + ' menit tersisa';
       $('st-limit').textContent = Number(s.remainingMin || s.limitMin || 0).toFixed(1).replace('.0', '') + ' menit';
       $('st-now').textContent = fmtClock(nowSrv());
@@ -1038,7 +1028,6 @@
     APP.syncSeq++; // batalkan respons sync lama agar tidak menimpa hasil scan
     var wasInBreak = !!(APP.state && APP.state.activeBreak);
     var action = wasInBreak ? 'IN' : 'OUT';
-    var priorState = cloneState(APP.state);
     APP.pendingAction = action;
     var requestId = 'S' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
 
@@ -1047,85 +1036,21 @@
     setTimeout(function () { $('scan-flash').style.opacity = '0'; }, 90);
     closeScanner();
 
-    // OUT terasa instan: timer provisional langsung tampil dan tersimpan lokal.
-    // IN tetap mempertahankan timer sampai server mengonfirmasi, tetapi layar tidak diblokir.
+    // UI diselesaikan lebih dulu. Penyimpanan server sama sekali tidak menahan tampilan.
     if (action === 'OUT') {
       APP.state = cloneState(APP.state);
       APP.state.activeBreak = pendingActiveBreak();
       saveStateLocal();
+      renderHome();
+    } else {
+      var instantResult = localBreakResult(APP.state.activeBreak);
+      applyLocalBreakIn(instantResult);
+      renderHome();
+      showResult(instantResult);
     }
-    renderHome();
-    showScanToast('ok', 'QR terbaca', action === 'OUT' ? 'Break langsung dimulai. Data disimpan di belakang.' : 'Scan masuk diterima. Konfirmasi berjalan di belakang.', 2200);
-
-    api({
-      fn: 'scan', nik: APP.emp.nik, qr: text, action: action, requestId: requestId
-    }, { retries: 1, timeoutMs: 25000 }).then(function (res) {
-      APP.scanPending = false;
-      APP.pendingAction = '';
-      applyState(res);
-      if (!res.ok) {
-        renderHome();
-        showScanToast('error', 'Belum tersimpan', res.error || 'Status tidak berubah. Silakan scan kembali.', 5000);
-        return;
-      }
-      if (res.action === 'IN' && res.result) {
-        showResult(res.result);
-        showScanToast('ok', 'Scan masuk tersimpan', 'Break selesai dan riwayat sudah diperbarui.', 2800);
-      } else {
-        renderHome();
-        showScanToast('ok', res.action === 'RESUME' ? 'Timer dilanjutkan' : 'Break tersimpan', 'Status sudah dikonfirmasi oleh Break_log.', 2200);
-      }
-    }).catch(function () {
-      // Request mungkin tetap selesai di server walaupun browser timeout. UI tidak diblokir.
-      if (!APP.emp) return;
-      showScanToast('warn', 'Masih menyinkronkan', 'Aplikasi sedang mencocokkan status di belakang.', 3500);
-      reconcileScan(action, wasInBreak, priorState, 0);
-    });
-  }
-
-  function reconcileScan(action, wasInBreak, priorState, attempt) {
-    sleep(attempt ? 1800 : 900).then(function () {
-      if (!APP.emp) throw new Error('Sesi tidak aktif.');
-      return api({ fn: 'state', nik: APP.emp.nik }, { retries: 0, timeoutMs: 30000 });
-    }).then(function (res) {
-      if (!res.ok) throw new Error(res.error || 'Status belum tersedia.');
-      var isActive = !!(res.state && res.state.activeBreak);
-      var confirmed = action === 'OUT' ? isActive : !isActive;
-      if (!confirmed && attempt < 2) return reconcileScan(action, wasInBreak, priorState, attempt + 1);
-
-      APP.scanPending = false;
-      APP.pendingAction = '';
-      if (confirmed) {
-        applyState(res);
-        renderHome();
-        showScanToast('ok', action === 'IN' ? 'Scan masuk tersimpan' : 'Break tersimpan', 'Status berhasil dikonfirmasi di belakang.', 2800);
-        return;
-      }
-
-      // OUT yang benar-benar tidak tersimpan dikembalikan ke kondisi awal.
-      // Untuk IN, timer aktif tetap dipertahankan agar tidak berhenti secara keliru.
-      if (action === 'OUT' && !wasInBreak) {
-        APP.state = priorState;
-        saveStateLocal();
-      }
-      renderHome();
-      showScanToast('error', 'Status belum tersimpan', wasInBreak ? 'Timer tetap berjalan. Silakan scan masuk kembali.' : 'Break dibatalkan karena server belum menerima data.', 6000);
-    }).catch(function () {
-      if (!APP.emp) {
-        APP.scanPending = false;
-        APP.pendingAction = '';
-        return;
-      }
-      if (attempt < 2) return reconcileScan(action, wasInBreak, priorState, attempt + 1);
-      APP.scanPending = false;
-      APP.pendingAction = '';
-      if (action === 'OUT' && !wasInBreak) {
-        APP.state = priorState;
-        saveStateLocal();
-      }
-      renderHome();
-      showScanToast('error', 'Koneksi belum stabil', wasInBreak ? 'Timer tetap berjalan. Silakan scan masuk kembali.' : 'Break belum tersimpan. Silakan scan kembali.', 6000);
-    });
+    var job = { requestId: requestId, nik: APP.emp.nik, qr: text, action: action, createdAt: Date.now() };
+    savePendingScan(job);
+    sendScanSilently(job, 0);
   }
 
   function showResult(r) {
@@ -1526,13 +1451,11 @@
     APP._syncDone = false;
     stopCountdown(); stopMonitorPoll(); stopHqPoll();
     closeScanner();
-    hideActionLayer();
     show('scr-home', false); show('scr-login', true);
   });
   $('btn-scan-out').addEventListener('click', openScanner);
   $('btn-scan-in').addEventListener('click', openScanner);
   $('btn-scan-cancel').addEventListener('click', closeScanner);
-  $('btn-action-close').addEventListener('click', hideActionLayer);
   $('btn-result-ok').addEventListener('click', renderHome);
   $('btn-mon-refresh').addEventListener('click', loadMonitor);
   $('btn-sync-retry').addEventListener('click', function () {
