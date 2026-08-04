@@ -8,7 +8,7 @@
   :root {
     --bg: #F7F8FA; --card: #FFFFFF; --ink: #202124; --muted: #70757D;
     --hair: #E7E9ED; --accent: #B20D2E; --accent-dark: #8D0A25;
-    --ok: #16805A; --warn: #B7791F; --late: #C62828;
+    --ok: #16805A; --warn: #B7791F; --late: #C62828; --no-scan: #6D3FB5;
     --serif: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
     --sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
     --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
@@ -70,6 +70,7 @@
   .pill { display: inline-block; padding: 3px 11px; border-radius: 999px; font-weight: 700; font-size: 11px;
           letter-spacing: 0.06em; text-transform: uppercase; color: #fff; background: var(--ink); }
   .pill.ok { background: var(--ok); } .pill.late { background: var(--late); }
+  .pill.no-scan { background: var(--no-scan); }
   .pill.line { background: transparent; color: var(--muted); border: 1px solid var(--hair); }
 
   .profile { display: flex; align-items: center; gap: 14px; }
@@ -105,6 +106,7 @@
           display: flex; align-items: center; gap: 12px; cursor: pointer; transition: transform .15s, border-color .15s, box-shadow .15s; }
   .item:hover { border-color: #C9CDD4; transform: translateY(-1px); box-shadow:0 7px 18px rgba(24,28,35,.06); }
   .item.late { border-color: var(--late); }
+  .item.no-scan { border-color: var(--no-scan); background: #FAF8FF; }
   .item .nm { font-weight: 700; font-size: 14.5px; }
   .item .sb { color: var(--muted); font-size: 12px; margin-top: 1px; }
   .item .rt { text-align: right; flex-shrink: 0; }
@@ -284,7 +286,6 @@
         <div class="row"><span>Kembali</span><span class="v" id="res-in"></span></div>
         <div class="row"><span>Durasi</span><span class="v" id="res-dur"></span></div>
       </div>
-      <button id="btn-result-ok" class="btn">Selesai</button>
     </div>
 
     <!-- supervisor: live outlet sendiri -->
@@ -391,7 +392,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script>
   // ════════════════════════════════════════════════════════════
-  // GITHUB PAGES v16 — notch-safe layout + silent background scan persistence
+  // GITHUB PAGES v18 — NO SCAN IN history/PDF + automatic scan-in result
   // Upload file ini sebagai index.html di root repository GitHub Pages.
   // Backend tetap Google Apps Script Web App URL (diakhiri /exec).
   // Session tahan 30 hari di browser, jadi tidak perlu login ulang setiap hari.
@@ -400,7 +401,7 @@
 
   var APP = { emp: null, state: null, session: null, offset: 0, timer: null, monTimer: null, monTick: null,
               lastMon: null, hq: { outlet: 'ALL', days: 1, tab: 'live', data: null, timer: null, tick: null, lastLoadAt: 0 },
-              _syncDone: false, scanPending: false, pendingAction: '', syncSeq: 0 };
+              _syncDone: false, scanPending: false, pendingAction: '', syncSeq: 0, resultTimer: null };
 
   function $(id) { return document.getElementById(id); }
   function show(id, on) { $(id).classList.toggle('hidden', !on); }
@@ -449,6 +450,7 @@
   }
 
   function handleSessionExpired() {
+    if (APP.resultTimer) { clearTimeout(APP.resultTimer); APP.resultTimer = null; }
     clearSavedSession();
     APP.emp = null;
     APP.state = null;
@@ -697,6 +699,7 @@
 
   // ── HOME ──────────────────────────────────────────────
   function renderHome() {
+    if (APP.resultTimer) { clearTimeout(APP.resultTimer); APP.resultTimer = null; }
     show('scr-login', false);
     show('scr-home', true);
     show('box-result', false);
@@ -753,11 +756,39 @@
   }
 
   // ── COUNTDOWN ─────────────────────────────────────────
+  function jakartaDayStart(ts) {
+    var parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit'
+    }).formatToParts(new Date(ts));
+    var map = {};
+    parts.forEach(function (p) { if (p.type !== 'literal') map[p.type] = p.value; });
+    return Date.parse(map.year + '-' + map.month + '-' + map.day + 'T00:00:00+07:00');
+  }
+  function noScanInCutoff(tsOut) {
+    var cutoff = jakartaDayStart(tsOut) + 86400000;
+    if (cutoff - tsOut <= 60 * 60000) cutoff += 86400000;
+    return cutoff;
+  }
   function tickCountdown() {
     var b = APP.state.activeBreak;
     if (!b) return;
+    var currentTs = nowSrv();
+    if (currentTs >= noScanInCutoff(Number(b.tsOut))) {
+      stopCountdown();
+      APP.state.activeBreak = null;
+      APP.state.usedToday = 0;
+      APP.state.sessionsToday = 0;
+      APP.state.usedMin = 0;
+      APP.state.remainingMin = Number(APP.state.totalQuotaMin || 60);
+      APP.state.limitMin = APP.state.remainingMin;
+      APP.state.serverNow = currentTs;
+      saveStateLocal();
+      renderHome();
+      if (!APP.scanPending) syncStateInBackground();
+      return;
+    }
     var limitMs = b.limitMin * 60000;
-    var elapsed = nowSrv() - b.tsOut;
+    var elapsed = currentTs - b.tsOut;
     var remain = limitMs - elapsed;
     var late = remain < 0;
     var frac = Math.min(1, elapsed / limitMs);
@@ -1059,6 +1090,7 @@
   }
 
   function showResult(r) {
+    if (APP.resultTimer) { clearTimeout(APP.resultTimer); }
     stopCountdown();
     show('box-active', false); show('box-start', false); show('box-blocked', false);
     $('res-pill').textContent = r.status === 'TERLAMBAT' ? 'TERLAMBAT +' + r.lateMin + ' MNT' : 'TEPAT WAKTU';
@@ -1067,6 +1099,10 @@
     $('res-in').textContent = r.timeIn.slice(0, 5);
     $('res-dur').textContent = r.durMin + ' menit (batas ' + r.limitMin + ')';
     show('box-result', true);
+    APP.resultTimer = setTimeout(function () {
+      APP.resultTimer = null;
+      if (APP.emp && APP.state) renderHome();
+    }, 1800);
   }
 
   // ── ITEM HTML (dipakai monitor, HQ, modal) ───────────
@@ -1090,12 +1126,13 @@
 
   function histItemHtml(b) {
     var late = b.status === 'TERLAMBAT';
+    var noScan = b.status === 'NO SCAN IN';
     var dateStr = b.tsOut ? new Date(b.tsOut).toLocaleDateString('id-ID', { timeZone: 'Asia/Jakarta', weekday: 'long', day: 'numeric', month: 'short' }) : '';
-    return '<div class="item" style="cursor: default;"><div style="flex: 1;">' +
+    return '<div class="item' + (noScan ? ' no-scan' : '') + '" style="cursor: default;"><div style="flex: 1;">' +
       '<div class="sb">' + esc(dateStr) + (b.outlet ? ' · ' + esc(b.outlet) : '') + '</div>' +
-      '<div style="font-family: var(--mono); font-weight: 700; margin-top: 2px;">' + b.timeOut.slice(0, 5) + ' → ' + (b.timeIn ? b.timeIn.slice(0, 5) : '…') + '</div>' +
+      '<div style="font-family: var(--mono); font-weight: 700; margin-top: 2px;">' + b.timeOut.slice(0, 5) + ' → ' + (noScan ? 'TIDAK SCAN' : (b.timeIn ? b.timeIn.slice(0, 5) : '…')) + '</div>' +
       (b.durMin != null ? '<div class="sb">' + b.durMin + ' mnt</div>' : '') +
-      '</div><span class="pill ' + (b.tsIn ? (late ? 'late' : 'ok') : '') + '">' + esc(b.status) + '</span></div>';
+      '</div><span class="pill ' + (noScan ? 'no-scan' : (b.tsIn ? (late ? 'late' : 'ok') : '')) + '">' + esc(b.status) + '</span></div>';
   }
 
   // ── SUPERVISOR: live outlet sendiri ───────────────────
@@ -1269,6 +1306,7 @@
     var COL_NONE = [242, 170, 30];   // kuning/oranye — titik besar
     var COL_LATE = [190, 40, 45];    // merah
     var COL_OPEN = [176, 123, 30];   // amber (sedang berjalan)
+    var COL_NO_SCAN = [109, 63, 181]; // ungu (tidak scan masuk)
     var COL_INK = [28, 25, 22];
     var COL_ACCENT = [168, 19, 37];  // merah maroon Bakerzin
 
@@ -1314,6 +1352,11 @@
     doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(COL_INK[0], COL_INK[1], COL_INK[2]);
     doc.text('Telat masuk (menit)', 362, ly);
 
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(COL_NO_SCAN[0], COL_NO_SCAN[1], COL_NO_SCAN[2]);
+    doc.text('NSI', 490, ly);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(COL_INK[0], COL_INK[1], COL_INK[2]);
+    doc.text('No Scan In', 512, ly);
+
     // ── Tabel ──
     var head = [['Nama', 'Posisi'].concat(data.dates.map(fmtDateShort))];
     var kindGrid = data.staff.map(function (s) { return s.days; });
@@ -1321,6 +1364,7 @@
       return [s.name, s.position || '-'].concat(s.days.map(function (day) {
         if (day.kind === 'LATE') return '+' + day.lateMin + 'm';
         if (day.kind === 'OPEN') return 'Berjalan';
+        if (day.kind === 'NO_SCAN') return 'NSI';
         return ''; // OK & NONE digambar sebagai ikon lewat didDrawCell
       }));
     });
@@ -1343,6 +1387,7 @@
         if (!day) return;
         if (day.kind === 'LATE') { hd.cell.styles.textColor = COL_LATE; hd.cell.styles.fontStyle = 'bold'; }
         else if (day.kind === 'OPEN') { hd.cell.styles.textColor = COL_OPEN; hd.cell.styles.fontStyle = 'bold'; }
+        else if (day.kind === 'NO_SCAN') { hd.cell.styles.textColor = COL_NO_SCAN; hd.cell.styles.fontStyle = 'bold'; hd.cell.styles.fillColor = [246, 241, 253]; }
       },
       didDrawCell: function (hd) {
         if (hd.section !== 'body' || hd.column.index < 2) return;
@@ -1408,12 +1453,14 @@
         $('md-ava').outerHTML = avaHtml(res.target.foto, res.target.name, 46).replace('class="ava"', 'class="ava" id="md-ava"');
       }
       var hist = res.history || [];
-      var onTime = hist.filter(function (b) { return b.tsIn && b.status !== 'TERLAMBAT'; }).length;
+      var noScan = hist.filter(function (b) { return b.status === 'NO SCAN IN'; }).length;
+      var onTime = hist.filter(function (b) { return b.tsIn && b.status !== 'TERLAMBAT' && b.status !== 'NO SCAN IN'; }).length;
       var late = hist.filter(function (b) { return b.status === 'TERLAMBAT' && b.tsIn; }).length;
       var summary = '<div class="card tight" style="display: flex; gap: 0; text-align: center; padding: 12px;">' +
         '<div style="flex: 1;"><div style="font-family: var(--mono); font-weight: 700; font-size: 19px;">' + hist.length + '</div><div class="sb" style="color: var(--muted); font-size: 11px;">BREAK</div></div>' +
         '<div style="flex: 1; border-left: 1px solid var(--hair);"><div style="font-family: var(--mono); font-weight: 700; font-size: 19px; color: var(--ok);">' + onTime + '</div><div class="sb" style="color: var(--muted); font-size: 11px;">TEPAT</div></div>' +
         '<div style="flex: 1; border-left: 1px solid var(--hair);"><div style="font-family: var(--mono); font-weight: 700; font-size: 19px; color: var(--late);">' + late + '</div><div class="sb" style="color: var(--muted); font-size: 11px;">TELAT</div></div>' +
+        '<div style="flex: 1; border-left: 1px solid var(--hair);"><div style="font-family: var(--mono); font-weight: 700; font-size: 19px; color: var(--no-scan);">' + noScan + '</div><div class="sb" style="color: var(--muted); font-size: 11px;">NO SCAN</div></div>' +
       '</div>';
       $('md-body').innerHTML = hist.length
         ? summary + hist.map(histItemHtml).join('')
@@ -1445,6 +1492,7 @@
   });
   $('inp-nik').addEventListener('keydown', function (ev) { if (ev.key === 'Enter') $('btn-login').click(); });
   $('btn-logout').addEventListener('click', function () {
+    if (APP.resultTimer) { clearTimeout(APP.resultTimer); APP.resultTimer = null; }
     try { api({ fn: 'logout' }, { retries: 0, timeoutMs: 5000 }).catch(function () {}); } catch (e) {}
     clearSavedSession();
     APP.emp = null;
@@ -1461,7 +1509,6 @@
   $('btn-scan-out').addEventListener('click', openScanner);
   $('btn-scan-in').addEventListener('click', openScanner);
   $('btn-scan-cancel').addEventListener('click', closeScanner);
-  $('btn-result-ok').addEventListener('click', renderHome);
   $('btn-mon-refresh').addEventListener('click', loadMonitor);
   $('btn-sync-retry').addEventListener('click', function () {
     show('btn-sync-retry', false);
