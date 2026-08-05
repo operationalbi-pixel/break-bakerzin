@@ -454,7 +454,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script>
   // ════════════════════════════════════════════════════════════
-  // GITHUB PAGES v22 — vertical circular scan delivery animation
+  // GITHUB PAGES v23 — write-only scan request + deferred data reads
   // Upload file ini sebagai index.html di root repository GitHub Pages.
   // Backend tetap Google Apps Script Web App URL (diakhiri /exec).
   // Session tahan 30 hari di browser, jadi tidak perlu login ulang setiap hari.
@@ -464,7 +464,8 @@
   var APP = { emp: null, state: null, session: null, offset: 0, timer: null, monTimer: null, monTick: null,
               lastMon: null, hq: { outlet: 'ALL', days: 1, tab: 'live', data: null, timer: null, tick: null, lastLoadAt: 0 },
               _syncDone: false, scanPending: false, pendingAction: '', syncSeq: 0, resultTimer: null,
-              scanSendSeq: 0, scanRetryTimer: null, saveUiTimer: null, saveElapsedTimer: null, activeScanJob: null };
+              scanSendSeq: 0, scanRetryTimer: null, saveUiTimer: null, saveElapsedTimer: null, activeScanJob: null,
+              deferDataReadsUntil: 0 };
 
   function $(id) { return document.getElementById(id); }
   function show(id, on) { $(id).classList.toggle('hidden', !on); }
@@ -678,7 +679,11 @@
     APP.saveUiTimer = setTimeout(function () {
       closeSaveOverlay();
       var finalResult = (res && res.result) || job.localResult;
+      if (APP.emp && APP.state) renderHome();
       if (job.action === 'IN' && finalResult && APP.emp && APP.state) showResult(finalResult);
+      setTimeout(function () {
+        if (APP.emp && APP.session && !APP.scanPending) syncStateInBackground();
+      }, 2600);
     }, successHoldMs);
   }
   function paintSaveFailure(message) {
@@ -709,12 +714,21 @@
   function finishSilentScan(job, res) {
     if (APP.scanRetryTimer) { clearTimeout(APP.scanRetryTimer); APP.scanRetryTimer = null; }
     clearPendingScan(job.requestId);
-    APP.scanPending = false;
-    APP.pendingAction = '';
     APP.scanSendSeq++;
     if (!APP.emp || String(APP.emp.nik) !== String(job.nik)) return;
     if (res && res.state) applyState(res);
-    renderHome();
+    else if (res && res.activeBreak && APP.state) {
+      APP.state = cloneState(APP.state);
+      APP.state.activeBreak = res.activeBreak;
+      APP.state.serverNow = Number(res.serverNow || Date.now());
+      saveActiveBreakCache(job.nik, res.activeBreak);
+      saveStateLocal();
+    }
+    if (res && res.serverNow) APP.offset = Number(res.serverNow) - Date.now();
+    APP.scanPending = false;
+    APP.pendingAction = '';
+    // Jangan mulai query state/dashboard bersamaan dengan animasi konfirmasi write.
+    APP.deferDataReadsUntil = Date.now() + 2400;
     paintSaveSuccess(job, res);
   }
   function finishScanFailure(job, res) {
@@ -724,6 +738,12 @@
     APP.pendingAction = '';
     APP.scanSendSeq++;
     if (res && res.state) applyState(res);
+    else if (job.previousState) {
+      APP.state = cloneState(job.previousState);
+      saveStateLocal();
+      if (APP.state.activeBreak) saveActiveBreakCache(job.nik, APP.state.activeBreak);
+      else clearActiveBreakCache(job.nik);
+    }
     if (APP.emp && APP.state) renderHome();
     paintSaveFailure((res && res.error) || 'Data scan tidak dapat disimpan.');
   }
@@ -742,7 +762,11 @@
     seq = Number(seq || APP.scanSendSeq);
     if (!APP.emp || !APP.session || seq !== APP.scanSendSeq) return;
     savePendingScan(job);
-    api({ fn: 'scan', nik: job.nik, qr: job.qr, action: job.action, requestId: job.requestId },
+    api({
+      fn: 'scanwrite', nik: job.nik, qr: job.qr, action: job.action, requestId: job.requestId,
+      clientTs: job.clientTs, limitMin: job.limitMin, breakRef: job.breakRef,
+      usedMinBefore: job.usedMinBefore, sessionsBefore: job.sessionsBefore
+    },
         { retries: 0, timeoutMs: 6500 }).then(function (res) {
       if (seq !== APP.scanSendSeq) return;
       if (res && (res.ok || (job.action === 'IN' && res.code === 'NO_ACTIVE_BREAK'))) {
@@ -750,7 +774,7 @@
         return;
       }
       // Penolakan aturan bisnis tidak boleh terlihat seolah-olah berhasil.
-      if (res && !res.retryable && (/kuota/i.test(res.error || '') || /QR tidak dikenal/i.test(res.error || ''))) {
+      if (res && !res.retryable && (/kuota|tidak dikenal|tidak valid|belum tersedia/i.test(res.error || ''))) {
         finishScanFailure(job, res);
         return;
       }
@@ -946,7 +970,7 @@
       stopMonitorPoll();
       if (!s.isHq) APP.hq.outlet = e.outlet; // Grade 3+ non-HQ dikunci ke outlet sendiri
       // Saat scan sedang disimpan, jangan kirim query dashboard tambahan yang bisa memperlambat request scan.
-      if (!APP.scanPending) loadHq(); else renderHq();
+      if (!APP.scanPending && Date.now() >= Number(APP.deferDataReadsUntil || 0)) loadHq(); else renderHq();
       startHqPoll();
     } else {
       stopMonitorPoll();
@@ -1261,6 +1285,8 @@
     APP.syncSeq++; // batalkan respons sync lama agar tidak menimpa hasil scan
     var wasInBreak = !!(APP.state && APP.state.activeBreak);
     var action = wasInBreak ? 'IN' : 'OUT';
+    var stateBeforeScan = cloneState(APP.state);
+    var breakRef = wasInBreak ? cloneState(APP.state.activeBreak) : null;
     APP.pendingAction = action;
     var requestId = 'S' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
 
@@ -1283,7 +1309,12 @@
     }
     var job = {
       requestId: requestId, nik: APP.emp.nik, qr: text, action: action,
-      createdAt: Date.now(), uiStartedAt: Date.now(), localResult: instantResult
+      createdAt: Date.now(), uiStartedAt: Date.now(), localResult: instantResult,
+      clientTs: action === 'OUT' && APP.state.activeBreak ? Number(APP.state.activeBreak.tsOut) : Date.now(),
+      limitMin: Number(stateBeforeScan.remainingMin || stateBeforeScan.limitMin || 60),
+      usedMinBefore: Number(stateBeforeScan.usedMin || 0),
+      sessionsBefore: Number(stateBeforeScan.sessionsToday || stateBeforeScan.usedToday || 0),
+      breakRef: breakRef, previousState: stateBeforeScan
     };
     startScanDelivery(job);
   }
@@ -1336,6 +1367,7 @@
 
   // ── SUPERVISOR: live outlet sendiri ───────────────────
   function loadMonitor() {
+    if (APP.scanPending || Date.now() < Number(APP.deferDataReadsUntil || 0)) return;
     api({ fn: 'live', nik: APP.emp.nik }).then(function (res) {
       if (!res.ok) { $('mon-live').innerHTML = '<div class="empty">' + esc(res.error) + '</div>'; return; }
       APP.offset = res.serverNow - Date.now();
@@ -1363,6 +1395,7 @@
 
   // ── HQ (BIHQ) ─────────────────────────────────────────
   function loadHq() {
+    if (APP.scanPending || Date.now() < Number(APP.deferDataReadsUntil || 0)) return;
     var outletReq = (APP.state && APP.state.isHq) ? APP.hq.outlet : APP.emp.outlet;
     api({ fn: 'hq', nik: APP.emp.nik, outlet: outletReq, days: APP.hq.days }).then(function (res) {
       if (!res.ok) { $('hq-list').innerHTML = '<div class="empty">' + esc(res.error) + '</div>'; return; }
