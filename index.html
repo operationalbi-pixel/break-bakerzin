@@ -156,6 +156,43 @@
   #scan-msg { color: #fff; font-size: 13px; min-height: 18px; font-weight: 700; }
   #scan-flash { position: absolute; inset: 0; background: #fff; opacity: 0; z-index: 3; pointer-events: none; transition: opacity 0.3s; }
 
+  /* konfirmasi penyimpanan scan */
+  #save-overlay { position: fixed; inset: 0; z-index: 90; display: flex; align-items: center; justify-content: center;
+                  padding: max(24px, env(safe-area-inset-top)) 22px max(24px, env(safe-area-inset-bottom));
+                  background: rgba(247,248,250,.96); backdrop-filter: blur(12px); }
+  .save-card { width: 100%; max-width: 390px; background: #fff; border: 1px solid var(--hair); border-radius: 24px;
+               padding: 26px 22px 22px; box-shadow: 0 22px 60px rgba(28,31,38,.12); text-align: center; }
+  .save-orbit { width: 86px; height: 86px; margin: 0 auto 18px; border-radius: 50%; position: relative;
+                display: grid; place-items: center; background: #F5F7FA; color: var(--accent); }
+  .save-orbit::before { content: ''; position: absolute; inset: 0; border-radius: inherit; border: 3px solid transparent;
+                        border-top-color: var(--accent); border-right-color: rgba(178,13,46,.22); animation: saveSpin 1s linear infinite; }
+  .save-orbit .ico { width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center;
+                     background: #fff; box-shadow: 0 5px 16px rgba(28,31,38,.08); font-size: 21px; font-weight: 800; }
+  .save-card.success .save-orbit { color: var(--ok); background: rgba(22,128,90,.08); }
+  .save-card.success .save-orbit::before { border-color: var(--ok); animation: none; }
+  .save-card.failed .save-orbit { color: var(--late); background: rgba(198,40,40,.08); }
+  .save-card.failed .save-orbit::before { border-color: var(--late); animation: none; }
+  .save-title { font-size: 21px; font-weight: 800; letter-spacing: -.02em; }
+  .save-sub { color: var(--muted); font-size: 13px; line-height: 1.55; min-height: 40px; margin: 7px auto 17px; max-width: 300px; }
+  .save-steps { display: grid; grid-template-columns: repeat(3,1fr); gap: 7px; margin: 0 0 15px; }
+  .save-step { border-radius: 11px; padding: 9px 4px; background: #F5F6F8; color: #9AA0A6; font-size: 10px; font-weight: 800; }
+  .save-step.done { background: rgba(22,128,90,.09); color: var(--ok); }
+  .save-step.active { background: rgba(178,13,46,.08); color: var(--accent); animation: savePulse 1.15s ease-in-out infinite; }
+  .save-progress { height: 5px; overflow: hidden; border-radius: 999px; background: var(--hair); margin-bottom: 14px; }
+  .save-progress > div { height: 100%; width: 38%; border-radius: inherit; background: linear-gradient(90deg,var(--accent),#EB6A7C);
+                         animation: saveTravel 1.25s ease-in-out infinite; }
+  .save-card.success .save-progress > div { width: 100%; background: var(--ok); animation: none; }
+  .save-card.failed .save-progress > div { width: 100%; background: var(--late); animation: none; }
+  .save-note { display: flex; align-items: center; justify-content: center; gap: 7px; color: var(--muted); font-size: 11px; min-height: 17px; }
+  .save-note b { color: var(--ink); }
+  .save-actions { display: flex; gap: 8px; margin-top: 14px; }
+  @keyframes saveSpin { to { transform: rotate(360deg); } }
+  @keyframes savePulse { 50% { transform: translateY(-1px); opacity: .65; } }
+  @keyframes saveTravel { from { transform: translateX(-110%); } to { transform: translateX(270%); } }
+  @media (prefers-reduced-motion: reduce) {
+    .save-orbit::before, .save-step.active, .save-progress > div { animation-duration: 2.8s; }
+  }
+
   .live-badge { display: inline-flex; align-items: center; gap: 7px; padding: 6px 10px; border-radius: 999px;
                 background: rgba(22,128,90,.09); color: var(--ok); font-size: 10px; font-weight: 800; letter-spacing: .08em; }
   .live-badge::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor;
@@ -338,6 +375,26 @@
   </div>
 </div>
 
+<!-- KONFIRMASI SIMPAN SCAN -->
+<div id="save-overlay" class="hidden" role="dialog" aria-modal="true" aria-live="polite">
+  <div class="save-card" id="save-card">
+    <div class="save-orbit"><div class="ico" id="save-icon">↥</div></div>
+    <div class="save-title" id="save-title">Mengamankan data scan</div>
+    <div class="save-sub" id="save-sub">Tetap di halaman ini sebentar agar data tercatat dengan aman.</div>
+    <div class="save-steps">
+      <div class="save-step done" id="save-step-qr">✓ QR terbaca</div>
+      <div class="save-step active" id="save-step-send">Mengirim</div>
+      <div class="save-step" id="save-step-done">Tersimpan</div>
+    </div>
+    <div class="save-progress"><div></div></div>
+    <div class="save-note" id="save-note"><b>Mohon jangan tutup aplikasi</b></div>
+    <div class="save-actions hidden" id="save-actions">
+      <button class="btn secondary" id="btn-save-retry" style="flex:1;">Kirim ulang sekarang</button>
+      <button class="btn hidden" id="btn-save-close" style="flex:1;">Kembali</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL riwayat staff -->
 <div id="modal" class="hidden">
   <div class="box">
@@ -392,7 +449,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script>
   // ════════════════════════════════════════════════════════════
-  // GITHUB PAGES v19 — hard midnight cutoff + fresh daily cache reset
+  // GITHUB PAGES v21 — three-second fast path + confirmed scan delivery
   // Upload file ini sebagai index.html di root repository GitHub Pages.
   // Backend tetap Google Apps Script Web App URL (diakhiri /exec).
   // Session tahan 30 hari di browser, jadi tidak perlu login ulang setiap hari.
@@ -401,7 +458,8 @@
 
   var APP = { emp: null, state: null, session: null, offset: 0, timer: null, monTimer: null, monTick: null,
               lastMon: null, hq: { outlet: 'ALL', days: 1, tab: 'live', data: null, timer: null, tick: null, lastLoadAt: 0 },
-              _syncDone: false, scanPending: false, pendingAction: '', syncSeq: 0, resultTimer: null };
+              _syncDone: false, scanPending: false, pendingAction: '', syncSeq: 0, resultTimer: null,
+              scanSendSeq: 0, scanRetryTimer: null, saveUiTimer: null, saveElapsedTimer: null, activeScanJob: null };
 
   function $(id) { return document.getElementById(id); }
   function show(id, on) { $(id).classList.toggle('hidden', !on); }
@@ -451,6 +509,9 @@
 
   function handleSessionExpired() {
     if (APP.resultTimer) { clearTimeout(APP.resultTimer); APP.resultTimer = null; }
+    if (APP.scanRetryTimer) { clearTimeout(APP.scanRetryTimer); APP.scanRetryTimer = null; }
+    APP.scanSendSeq++;
+    closeSaveOverlay();
     clearSavedSession();
     APP.emp = null;
     APP.state = null;
@@ -545,6 +606,89 @@
     APP.state = s;
     saveStateLocal();
   }
+
+  function clearSaveUiTimers() {
+    if (APP.saveUiTimer) { clearTimeout(APP.saveUiTimer); APP.saveUiTimer = null; }
+    if (APP.saveElapsedTimer) { clearInterval(APP.saveElapsedTimer); APP.saveElapsedTimer = null; }
+  }
+  function closeSaveOverlay() {
+    clearSaveUiTimers();
+    show('save-overlay', false);
+    APP.activeScanJob = null;
+  }
+  function paintSavePending(job) {
+    clearSaveUiTimers();
+    APP.activeScanJob = job;
+    if (!job.uiStartedAt) job.uiStartedAt = Date.now();
+    $('save-card').className = 'save-card';
+    $('save-icon').textContent = '↑';
+    $('save-title').textContent = job.action === 'IN' ? 'Menyimpan scan masuk' : 'Menyimpan scan keluar';
+    $('save-sub').textContent = job.action === 'IN'
+      ? 'Timer sudah dihentikan. Tunggu sampai data masuk terkonfirmasi.'
+      : 'Timer sudah berjalan. Tunggu sampai data keluar terkonfirmasi.';
+    $('save-step-qr').className = 'save-step done';
+    $('save-step-send').className = 'save-step active';
+    $('save-step-send').textContent = 'Mengirim';
+    $('save-step-done').className = 'save-step';
+    $('save-note').innerHTML = '<b>Mohon jangan tutup aplikasi</b>';
+    show('save-actions', false);
+    show('btn-save-retry', true);
+    show('btn-save-close', false);
+    show('save-overlay', true);
+
+    function updateWaitCopy() {
+      var sec = Math.max(0, Math.floor((Date.now() - Number(job.uiStartedAt || Date.now())) / 1000));
+      if (sec < 3) {
+        $('save-note').innerHTML = '<b>Menghubungkan ke database…</b>';
+      } else if (sec < 8) {
+        $('save-note').innerHTML = 'Koneksi lebih lambat dari biasanya · <b>' + sec + ' detik</b>';
+      } else {
+        $('save-note').innerHTML = 'Masih mencoba otomatis · <b>' + sec + ' detik</b>';
+        show('save-actions', true);
+      }
+    }
+    updateWaitCopy();
+    APP.saveElapsedTimer = setInterval(updateWaitCopy, 1000);
+  }
+  function paintSaveSuccess(job, res) {
+    clearSaveUiTimers();
+    $('save-card').className = 'save-card success';
+    $('save-icon').textContent = '✓';
+    $('save-title').textContent = job.action === 'IN' ? 'Scan masuk tersimpan' : 'Scan keluar tersimpan';
+    $('save-sub').textContent = job.action === 'IN'
+      ? 'Break selesai dan data sudah aman di database.'
+      : 'Break dimulai dan data sudah aman di database.';
+    $('save-step-send').className = 'save-step done';
+    $('save-step-send').textContent = '✓ Terkirim';
+    $('save-step-done').className = 'save-step done';
+    $('save-step-done').textContent = '✓ Tersimpan';
+    $('save-note').innerHTML = '<b>Data terkonfirmasi</b> · halaman kembali otomatis';
+    show('save-actions', false);
+    if (navigator.vibrate) navigator.vibrate([45, 35, 70]);
+    var elapsed = Date.now() - Number(job.uiStartedAt || Date.now());
+    // Respons normal selesai bersama animasi sukses dalam jendela sekitar tiga detik.
+    var successHoldMs = Math.max(180, Math.min(500, 3000 - elapsed));
+    APP.saveUiTimer = setTimeout(function () {
+      closeSaveOverlay();
+      var finalResult = (res && res.result) || job.localResult;
+      if (job.action === 'IN' && finalResult && APP.emp && APP.state) showResult(finalResult);
+    }, successHoldMs);
+  }
+  function paintSaveFailure(message) {
+    clearSaveUiTimers();
+    $('save-card').className = 'save-card failed';
+    $('save-icon').textContent = '!';
+    $('save-title').textContent = 'Data belum tersimpan';
+    $('save-sub').textContent = message || 'Data ditolak oleh server. Periksa status lalu coba kembali.';
+    $('save-step-send').className = 'save-step';
+    $('save-step-send').textContent = 'Gagal kirim';
+    $('save-step-done').className = 'save-step';
+    $('save-note').innerHTML = '<b>Scan tidak dicatat</b>';
+    show('save-actions', true);
+    show('btn-save-retry', false);
+    show('btn-save-close', true);
+  }
+
   function pendingScanKey() { return 'ab_pending_scan_v15'; }
   function savePendingScan(job) {
     try { localStorage.setItem(pendingScanKey(), JSON.stringify(job)); } catch (e) {}
@@ -554,40 +698,72 @@
     if (!requestId || !job || job.requestId === requestId) localStorage.removeItem(pendingScanKey());
   }
   function finishSilentScan(job, res) {
+    if (APP.scanRetryTimer) { clearTimeout(APP.scanRetryTimer); APP.scanRetryTimer = null; }
     clearPendingScan(job.requestId);
     APP.scanPending = false;
     APP.pendingAction = '';
+    APP.scanSendSeq++;
     if (!APP.emp || String(APP.emp.nik) !== String(job.nik)) return;
     if (res && res.state) applyState(res);
-    // OUT perlu mengganti waktu provisional dengan waktu resmi server.
-    // IN tidak merender ulang agar hasil instan yang sedang dilihat tidak terganggu.
-    if (job.action === 'OUT' && APP.emp) renderHome();
+    renderHome();
+    paintSaveSuccess(job, res);
   }
-  function sendScanSilently(job, attempt) {
+  function finishScanFailure(job, res) {
+    if (APP.scanRetryTimer) { clearTimeout(APP.scanRetryTimer); APP.scanRetryTimer = null; }
+    clearPendingScan(job.requestId);
+    APP.scanPending = false;
+    APP.pendingAction = '';
+    APP.scanSendSeq++;
+    if (res && res.state) applyState(res);
+    if (APP.emp && APP.state) renderHome();
+    paintSaveFailure((res && res.error) || 'Data scan tidak dapat disimpan.');
+  }
+  function scheduleScanRetry(job, attempt, seq) {
+    if (seq !== APP.scanSendSeq || !APP.emp || !APP.session) return;
+    var wait = Math.min(15000, 1500 * Math.pow(1.7, Math.min(attempt, 5)));
+    if (attempt >= 1) show('save-actions', true);
+    if (APP.scanRetryTimer) clearTimeout(APP.scanRetryTimer);
+    APP.scanRetryTimer = setTimeout(function () {
+      APP.scanRetryTimer = null;
+      sendScanSilently(job, attempt + 1, seq);
+    }, wait);
+  }
+  function sendScanSilently(job, attempt, seq) {
     attempt = Number(attempt || 0);
-    if (!APP.emp || !APP.session) return;
+    seq = Number(seq || APP.scanSendSeq);
+    if (!APP.emp || !APP.session || seq !== APP.scanSendSeq) return;
     savePendingScan(job);
     api({ fn: 'scan', nik: job.nik, qr: job.qr, action: job.action, requestId: job.requestId },
-        { retries: 0, timeoutMs: 60000 }).then(function (res) {
+        { retries: 0, timeoutMs: 6500 }).then(function (res) {
+      if (seq !== APP.scanSendSeq) return;
       if (res && (res.ok || (job.action === 'IN' && res.code === 'NO_ACTIVE_BREAK'))) {
         finishSilentScan(job, res);
         return;
       }
-      // Semua kegagalan server dicoba ulang diam-diam. Tidak ada pesan/loading di frontend.
-      var wait = Math.min(60000, 2000 * Math.pow(2, Math.min(attempt, 5)));
-      setTimeout(function () { sendScanSilently(job, attempt + 1); }, wait);
+      // Penolakan aturan bisnis tidak boleh terlihat seolah-olah berhasil.
+      if (res && !res.retryable && (/kuota/i.test(res.error || '') || /QR tidak dikenal/i.test(res.error || ''))) {
+        finishScanFailure(job, res);
+        return;
+      }
+      scheduleScanRetry(job, attempt, seq);
     }).catch(function () {
-      if (!APP.emp || !APP.session) return;
-      var wait = Math.min(60000, 2000 * Math.pow(2, Math.min(attempt, 5)));
-      setTimeout(function () { sendScanSilently(job, attempt + 1); }, wait);
+      scheduleScanRetry(job, attempt, seq);
     });
+  }
+  function startScanDelivery(job) {
+    if (APP.scanRetryTimer) { clearTimeout(APP.scanRetryTimer); APP.scanRetryTimer = null; }
+    APP.scanPending = true;
+    APP.pendingAction = job.action || '';
+    var seq = ++APP.scanSendSeq;
+    paintSavePending(job);
+    savePendingScan(job);
+    sendScanSilently(job, 0, seq);
   }
   function resumePendingScan() {
     var job = parseJsonSafe(localStorage.getItem(pendingScanKey()), null);
     if (!job || !APP.emp || String(job.nik) !== String(APP.emp.nik)) return;
-    APP.scanPending = true;
-    APP.pendingAction = job.action || '';
-    sendScanSilently(job, 0);
+    if (APP.scanPending && APP.activeScanJob && APP.activeScanJob.requestId === job.requestId) return;
+    startScanDelivery(job);
   }
   function applyState(res) {
     if (res.state) {
@@ -1084,21 +1260,23 @@
     setTimeout(function () { $('scan-flash').style.opacity = '0'; }, 90);
     closeScanner();
 
-    // UI diselesaikan lebih dulu. Penyimpanan server sama sekali tidak menahan tampilan.
+    // Timer merespons langsung, tetapi konfirmasi baru selesai setelah database menjawab sukses.
+    var instantResult = null;
     if (action === 'OUT') {
       APP.state = cloneState(APP.state);
       APP.state.activeBreak = pendingActiveBreak();
       saveStateLocal();
       renderHome();
     } else {
-      var instantResult = localBreakResult(APP.state.activeBreak);
+      instantResult = localBreakResult(APP.state.activeBreak);
       applyLocalBreakIn(instantResult);
       renderHome();
-      showResult(instantResult);
     }
-    var job = { requestId: requestId, nik: APP.emp.nik, qr: text, action: action, createdAt: Date.now() };
-    savePendingScan(job);
-    sendScanSilently(job, 0);
+    var job = {
+      requestId: requestId, nik: APP.emp.nik, qr: text, action: action,
+      createdAt: Date.now(), uiStartedAt: Date.now(), localResult: instantResult
+    };
+    startScanDelivery(job);
   }
 
   function showResult(r) {
@@ -1504,6 +1682,11 @@
   });
   $('inp-nik').addEventListener('keydown', function (ev) { if (ev.key === 'Enter') $('btn-login').click(); });
   $('btn-logout').addEventListener('click', function () {
+    if (APP.scanPending) {
+      var pendingJob = APP.activeScanJob || parseJsonSafe(localStorage.getItem(pendingScanKey()), null);
+      if (pendingJob) paintSavePending(pendingJob);
+      return;
+    }
     if (APP.resultTimer) { clearTimeout(APP.resultTimer); APP.resultTimer = null; }
     try { api({ fn: 'logout' }, { retries: 0, timeoutMs: 5000 }).catch(function () {}); } catch (e) {}
     clearSavedSession();
@@ -1516,6 +1699,7 @@
     APP._syncDone = false;
     stopCountdown(); stopMonitorPoll(); stopHqPoll();
     closeScanner();
+    closeSaveOverlay();
     show('scr-home', false); show('scr-login', true);
   });
   $('btn-scan-out').addEventListener('click', openScanner);
@@ -1525,6 +1709,28 @@
   $('btn-sync-retry').addEventListener('click', function () {
     show('btn-sync-retry', false);
     syncStateInBackground();
+  });
+  $('btn-save-retry').addEventListener('click', function () {
+    var job = APP.activeScanJob || parseJsonSafe(localStorage.getItem(pendingScanKey()), null);
+    if (job && APP.emp && APP.session) startScanDelivery(job);
+  });
+  $('btn-save-close').addEventListener('click', function () {
+    if (!APP.scanPending) closeSaveOverlay();
+  });
+
+  // Browser dapat mengabaikan dialog ini di beberapa HP, sehingga requestId juga tetap disimpan
+  // dan akan dilanjutkan otomatis ketika aplikasi dibuka kembali.
+  window.addEventListener('beforeunload', function (ev) {
+    if (!APP.scanPending) return;
+    ev.preventDefault();
+    ev.returnValue = '';
+  });
+  window.addEventListener('online', function () {
+    var job = parseJsonSafe(localStorage.getItem(pendingScanKey()), null);
+    if (job && APP.emp && APP.session) startScanDelivery(job);
+  });
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) setTimeout(resumePendingScan, 250);
   });
 
   var histShown = false;
