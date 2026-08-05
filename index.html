@@ -392,7 +392,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script>
   // ════════════════════════════════════════════════════════════
-  // GITHUB PAGES v18 — NO SCAN IN history/PDF + automatic scan-in result
+  // GITHUB PAGES v19 — hard midnight cutoff + fresh daily cache reset
   // Upload file ini sebagai index.html di root repository GitHub Pages.
   // Backend tetap Google Apps Script Web App URL (diakhiri /exec).
   // Session tahan 30 hari di browser, jadi tidak perlu login ulang setiap hari.
@@ -684,6 +684,20 @@
     // Jangan memakai serverNow lama dari cache; itu membuat timer kembali ke waktu sebelumnya.
     APP.offset = 0;
 
+    // Cache dari tanggal kemarin tidak boleh menahan timer atau sisa kuota hari sebelumnya.
+    var cachedDayTs = Number(savedState.serverNow || loginAt || 0);
+    if (!cachedDayTs || jakartaDayStart(cachedDayTs) !== jakartaDayStart(Date.now())) {
+      APP.state.activeBreak = null;
+      APP.state.usedToday = 0;
+      APP.state.sessionsToday = 0;
+      APP.state.usedMin = 0;
+      APP.state.remainingMin = Number(APP.state.totalQuotaMin || 60);
+      APP.state.limitMin = APP.state.remainingMin;
+      APP.state.serverNow = Date.now();
+      APP.state.pendingSync = false;
+      saveStateLocal();
+    }
+
     renderHome();
     resumePendingScan();
 
@@ -765,9 +779,7 @@
     return Date.parse(map.year + '-' + map.month + '-' + map.day + 'T00:00:00+07:00');
   }
   function noScanInCutoff(tsOut) {
-    var cutoff = jakartaDayStart(tsOut) + 86400000;
-    if (cutoff - tsOut <= 60 * 60000) cutoff += 86400000;
-    return cutoff;
+    return jakartaDayStart(tsOut) + 86400000;
   }
   function tickCountdown() {
     var b = APP.state.activeBreak;
