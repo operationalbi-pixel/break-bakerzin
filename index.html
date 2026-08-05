@@ -159,38 +159,34 @@
   /* konfirmasi penyimpanan scan */
   #save-overlay { position: fixed; inset: 0; z-index: 90; display: flex; align-items: center; justify-content: center;
                   padding: max(24px, env(safe-area-inset-top)) 22px max(24px, env(safe-area-inset-bottom));
-                  background: rgba(247,248,250,.96); backdrop-filter: blur(12px); }
-  .save-card { width: 100%; max-width: 390px; background: #fff; border: 1px solid var(--hair); border-radius: 24px;
+                  background: rgba(247,248,250,.72); backdrop-filter: blur(6px); }
+  .save-card { width: 100%; max-width: 390px; background: rgba(255,255,255,.90); border: 1px solid rgba(231,233,237,.88); border-radius: 24px;
                padding: 26px 22px 22px; box-shadow: 0 22px 60px rgba(28,31,38,.12); text-align: center; }
-  .save-orbit { width: 86px; height: 86px; margin: 0 auto 18px; border-radius: 50%; position: relative;
-                display: grid; place-items: center; background: #F5F7FA; color: var(--accent); }
-  .save-orbit::before { content: ''; position: absolute; inset: 0; border-radius: inherit; border: 3px solid transparent;
-                        border-top-color: var(--accent); border-right-color: rgba(178,13,46,.22); animation: saveSpin 1s linear infinite; }
-  .save-orbit .ico { width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center;
-                     background: #fff; box-shadow: 0 5px 16px rgba(28,31,38,.08); font-size: 21px; font-weight: 800; }
-  .save-card.success .save-orbit { color: var(--ok); background: rgba(22,128,90,.08); }
-  .save-card.success .save-orbit::before { border-color: var(--ok); animation: none; }
-  .save-card.failed .save-orbit { color: var(--late); background: rgba(198,40,40,.08); }
-  .save-card.failed .save-orbit::before { border-color: var(--late); animation: none; }
   .save-title { font-size: 21px; font-weight: 800; letter-spacing: -.02em; }
-  .save-sub { color: var(--muted); font-size: 13px; line-height: 1.55; min-height: 40px; margin: 7px auto 17px; max-width: 300px; }
-  .save-steps { display: grid; grid-template-columns: repeat(3,1fr); gap: 7px; margin: 0 0 15px; }
-  .save-step { border-radius: 11px; padding: 9px 4px; background: #F5F6F8; color: #9AA0A6; font-size: 10px; font-weight: 800; }
-  .save-step.done { background: rgba(22,128,90,.09); color: var(--ok); }
-  .save-step.active { background: rgba(178,13,46,.08); color: var(--accent); animation: savePulse 1.15s ease-in-out infinite; }
-  .save-progress { height: 5px; overflow: hidden; border-radius: 999px; background: var(--hair); margin-bottom: 14px; }
-  .save-progress > div { height: 100%; width: 38%; border-radius: inherit; background: linear-gradient(90deg,var(--accent),#EB6A7C);
-                         animation: saveTravel 1.25s ease-in-out infinite; }
-  .save-card.success .save-progress > div { width: 100%; background: var(--ok); animation: none; }
-  .save-card.failed .save-progress > div { width: 100%; background: var(--late); animation: none; }
+  .save-sub { color: var(--muted); font-size: 13px; line-height: 1.55; min-height: 40px; margin: 7px auto 18px; max-width: 310px; }
+  .save-flow { width: min(100%, 248px); margin: 0 auto 18px; }
+  .save-flow-row { display: flex; align-items: center; gap: 16px; text-align: left; }
+  .save-node { width: 62px; height: 62px; flex: 0 0 62px; position: relative; border-radius: 50%;
+               display: grid; place-items: center; background: rgba(255,255,255,.70); border: 3px solid #DDE1E7;
+               color: #9AA0A6; font-size: 21px; font-weight: 900; }
+  .save-node::before { content: ''; position: absolute; inset: -4px; border-radius: 50%; border: 3px solid transparent; }
+  .save-node.active { border-color: transparent; color: var(--accent); background: rgba(255,255,255,.82); }
+  .save-node.active::before { border-top-color: var(--accent); border-right-color: rgba(178,13,46,.28);
+                              border-bottom-color: rgba(178,13,46,.10); animation: saveSpin .8s linear infinite; }
+  /* Hijau hanya berada di dalam lingkaran, dengan opacity 50%. */
+  .save-node.done { background: rgba(22,128,90,.50); border-color: rgba(22,128,90,.68); color: #fff;
+                    box-shadow: inset 0 0 0 1px rgba(255,255,255,.16); }
+  .save-node.failed { background: rgba(198,40,40,.16); border-color: rgba(198,40,40,.65); color: var(--late); }
+  .save-flow-copy { min-width: 0; }
+  .save-flow-copy b { display: block; font-size: 14px; color: var(--ink); }
+  .save-flow-copy span { display: block; margin-top: 2px; font-size: 11px; color: var(--muted); }
+  .save-link { width: 2px; height: 18px; margin: 3px 0 3px 30px; background: #DDE1E7; border-radius: 2px; }
   .save-note { display: flex; align-items: center; justify-content: center; gap: 7px; color: var(--muted); font-size: 11px; min-height: 17px; }
   .save-note b { color: var(--ink); }
   .save-actions { display: flex; gap: 8px; margin-top: 14px; }
   @keyframes saveSpin { to { transform: rotate(360deg); } }
-  @keyframes savePulse { 50% { transform: translateY(-1px); opacity: .65; } }
-  @keyframes saveTravel { from { transform: translateX(-110%); } to { transform: translateX(270%); } }
   @media (prefers-reduced-motion: reduce) {
-    .save-orbit::before, .save-step.active, .save-progress > div { animation-duration: 2.8s; }
+    .save-node.active::before { animation-duration: 2.2s; }
   }
 
   .live-badge { display: inline-flex; align-items: center; gap: 7px; padding: 6px 10px; border-radius: 999px;
@@ -378,15 +374,24 @@
 <!-- KONFIRMASI SIMPAN SCAN -->
 <div id="save-overlay" class="hidden" role="dialog" aria-modal="true" aria-live="polite">
   <div class="save-card" id="save-card">
-    <div class="save-orbit"><div class="ico" id="save-icon">↥</div></div>
     <div class="save-title" id="save-title">Mengamankan data scan</div>
     <div class="save-sub" id="save-sub">Tetap di halaman ini sebentar agar data tercatat dengan aman.</div>
-    <div class="save-steps">
-      <div class="save-step done" id="save-step-qr">✓ QR terbaca</div>
-      <div class="save-step active" id="save-step-send">Mengirim</div>
-      <div class="save-step" id="save-step-done">Tersimpan</div>
+    <div class="save-flow">
+      <div class="save-flow-row">
+        <div class="save-node done" id="save-step-qr"><span id="save-icon-qr">✓</span></div>
+        <div class="save-flow-copy"><b>Scan Terbaca</b><span>QR berhasil dikenali</span></div>
+      </div>
+      <div class="save-link"></div>
+      <div class="save-flow-row">
+        <div class="save-node active" id="save-step-send"><span id="save-icon-send">↑</span></div>
+        <div class="save-flow-copy"><b>Mengirim Data</b><span>Menunggu konfirmasi server</span></div>
+      </div>
+      <div class="save-link"></div>
+      <div class="save-flow-row">
+        <div class="save-node" id="save-step-done"><span id="save-icon-done">3</span></div>
+        <div class="save-flow-copy"><b>Berhasil</b><span>Data aman di database</span></div>
+      </div>
     </div>
-    <div class="save-progress"><div></div></div>
     <div class="save-note" id="save-note"><b>Mohon jangan tutup aplikasi</b></div>
     <div class="save-actions hidden" id="save-actions">
       <button class="btn secondary" id="btn-save-retry" style="flex:1;">Kirim ulang sekarang</button>
@@ -449,7 +454,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script>
   // ════════════════════════════════════════════════════════════
-  // GITHUB PAGES v21 — three-second fast path + confirmed scan delivery
+  // GITHUB PAGES v22 — vertical circular scan delivery animation
   // Upload file ini sebagai index.html di root repository GitHub Pages.
   // Backend tetap Google Apps Script Web App URL (diakhiri /exec).
   // Session tahan 30 hari di browser, jadi tidak perlu login ulang setiap hari.
@@ -621,15 +626,16 @@
     APP.activeScanJob = job;
     if (!job.uiStartedAt) job.uiStartedAt = Date.now();
     $('save-card').className = 'save-card';
-    $('save-icon').textContent = '↑';
     $('save-title').textContent = job.action === 'IN' ? 'Menyimpan scan masuk' : 'Menyimpan scan keluar';
     $('save-sub').textContent = job.action === 'IN'
       ? 'Timer sudah dihentikan. Tunggu sampai data masuk terkonfirmasi.'
       : 'Timer sudah berjalan. Tunggu sampai data keluar terkonfirmasi.';
-    $('save-step-qr').className = 'save-step done';
-    $('save-step-send').className = 'save-step active';
-    $('save-step-send').textContent = 'Mengirim';
-    $('save-step-done').className = 'save-step';
+    $('save-step-qr').className = 'save-node done';
+    $('save-icon-qr').textContent = '✓';
+    $('save-step-send').className = 'save-node active';
+    $('save-icon-send').textContent = '↑';
+    $('save-step-done').className = 'save-node';
+    $('save-icon-done').textContent = '3';
     $('save-note').innerHTML = '<b>Mohon jangan tutup aplikasi</b>';
     show('save-actions', false);
     show('btn-save-retry', true);
@@ -653,15 +659,16 @@
   function paintSaveSuccess(job, res) {
     clearSaveUiTimers();
     $('save-card').className = 'save-card success';
-    $('save-icon').textContent = '✓';
     $('save-title').textContent = job.action === 'IN' ? 'Scan masuk tersimpan' : 'Scan keluar tersimpan';
     $('save-sub').textContent = job.action === 'IN'
       ? 'Break selesai dan data sudah aman di database.'
       : 'Break dimulai dan data sudah aman di database.';
-    $('save-step-send').className = 'save-step done';
-    $('save-step-send').textContent = '✓ Terkirim';
-    $('save-step-done').className = 'save-step done';
-    $('save-step-done').textContent = '✓ Tersimpan';
+    $('save-step-qr').className = 'save-node done';
+    $('save-icon-qr').textContent = '✓';
+    $('save-step-send').className = 'save-node done';
+    $('save-icon-send').textContent = '✓';
+    $('save-step-done').className = 'save-node done';
+    $('save-icon-done').textContent = '✓';
     $('save-note').innerHTML = '<b>Data terkonfirmasi</b> · halaman kembali otomatis';
     show('save-actions', false);
     if (navigator.vibrate) navigator.vibrate([45, 35, 70]);
@@ -677,12 +684,14 @@
   function paintSaveFailure(message) {
     clearSaveUiTimers();
     $('save-card').className = 'save-card failed';
-    $('save-icon').textContent = '!';
     $('save-title').textContent = 'Data belum tersimpan';
     $('save-sub').textContent = message || 'Data ditolak oleh server. Periksa status lalu coba kembali.';
-    $('save-step-send').className = 'save-step';
-    $('save-step-send').textContent = 'Gagal kirim';
-    $('save-step-done').className = 'save-step';
+    $('save-step-qr').className = 'save-node done';
+    $('save-icon-qr').textContent = '✓';
+    $('save-step-send').className = 'save-node failed';
+    $('save-icon-send').textContent = '!';
+    $('save-step-done').className = 'save-node';
+    $('save-icon-done').textContent = '3';
     $('save-note').innerHTML = '<b>Scan tidak dicatat</b>';
     show('save-actions', true);
     show('btn-save-retry', false);
